@@ -1,0 +1,11 @@
+[workspace]
+authors = ["nan mu <mu.nan.11@outlook.com>"]
+channels = ["conda-forge"]
+name = "tools"
+platforms = ["osx-arm64"]
+version = "0.1.0"
+
+[tasks]
+
+[dependencies]
+python = ">=3.14.3,<3.15"
