@@ -1,9 +1,10 @@
-use std::fs::OpenOptions;
+use std::fs::{self, OpenOptions};
 use std::io::{self, BufRead, Write};
 use std::collections::HashMap;
 
 use anyhow::{bail, Context, Result};
 use clap::Parser;
+use object::{Object, ObjectSection};
 use tracing::{debug, info, warn};
 
 pub mod aot_rv32;
@@ -16,9 +17,11 @@ mod tests;
 struct Cli {
     /// Output assembly file path (omit to print raw hex to stdout)
     output: Option<String>,
+    /// Get object file from path instead of stdin
+    input: Option<String>,
 }
 
-fn main() {
+fn main() -> Result<()> {
     // Initialize tracing; RUST_LOG controls verbosity, default = info
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
@@ -28,63 +31,35 @@ fn main() {
         )
         .init();
 
-    if let Err(e) = run() {
-        eprintln!("error: {e:#}");
-        std::process::exit(1);
-    }
+    run().context("Failed to run AOT compiler")
 }
 
 fn run() -> Result<()> {
     let cli = Cli::parse();
 
-    // ── Read hex bytes from stdin ────────────────────────────────────────────
-    let mut ebpf_dump: Vec<u8> = Vec::new();
-    // llvm-readelf -x inserts an 8-hex-char offset token at the start of every
-    // group of 4 words (i.e. every 16 bytes).  We skip any line whose value
-    // exactly equals the current byte offset so far.
-    for line in io::stdin().lock().lines() {
-        let line = line.context("读取 stdin 失败")?;
-        if line.trim().is_empty() {
-            break;
+    // read bytes
+    let bytes = match cli.input {
+        Some(ref path) => {
+            debug!("read eBPF bytes from file '{}'", path);
+            read_from_file(path)?
         }
-        let hex = line.trim();
-        // Skip readelf offset labels
-        if hex.len() == 8 {
-            if let Ok(val) = u32::from_str_radix(hex, 16) {
-                if val == ebpf_dump.len() as u32 {
-                    debug!(offset = val, "跳过 readelf 地址标签");
-                    continue;
-                }
-            }
+        None => {
+            debug!("read eBPF bytes from stdin");
+            read_from_stdin()?
         }
-        if hex.len() % 2 != 0 {
-            bail!("十六进制行长度不是 2 的倍数：'{}'", hex);
-        }
-        for chunk in hex.as_bytes().chunks(2) {
-            let hi = (chunk[0] as char)
-                .to_digit(16)
-                .with_context(|| format!("无效十六进制字符: {}", chunk[0] as char))?  as u8;
-            let lo = (chunk[1] as char)
-                .to_digit(16)
-                .with_context(|| format!("无效十六进制字符: {}", chunk[1] as char))? as u8;
-            ebpf_dump.push((hi << 4) | lo);
-        }
-    }
+    };
 
-    if ebpf_dump.len() % 8 != 0 {
-        bail!("输入字节数不是 8 的倍数，实际字节数：{}", ebpf_dump.len());
-    }
-    info!(bytes = ebpf_dump.len(), "读取 eBPF 字节完成");
+    info!(bytes = bytes.len(), "eBPF bytecode read successfully");
 
-    // ── AOT compile ──────────────────────────────────────────────────────────
-    info!("开始 AOT 编译 (eBPF -> RV32)...");
+    // AOT compile
+    debug!("begin AOT compiling (eBPF -> RV32)...");
     let helpers: HashMap<u32, usize> = HashMap::new();
-    let rv_machine_code = aot_rv32::bpf_to_rv32(&ebpf_dump, &helpers)
+    let rv_machine_code = aot_rv32::bpf_to_rv32(&bytes, &helpers)
         .map_err(anyhow::Error::msg)
-        .context("AOT 编译失败")?;
-    info!(instructions = rv_machine_code.len(), "编译完成");
+        .context("AOT compilation failed")?;
+    info!(instructions = rv_machine_code.len(), "Compilation completed");
 
-    // ── Output ───────────────────────────────────────────────────────────────
+    // Output
     match cli.output {
         None => {
             // stdout: raw hex only, no decoration
@@ -99,7 +74,7 @@ fn run() -> Result<()> {
                 .write(true)
                 .create_new(true)
                 .open(file_path)
-                .with_context(|| format!("无法创建文件 '{}'", file_path))?;
+                .with_context(|| format!("Failed to create file '{}'", file_path))?;
 
             writeln!(file, ".section .text.xdp_prog, \"ax\"")?;
             writeln!(file, ".global xdp_prog_main")?;
@@ -109,10 +84,63 @@ fn run() -> Result<()> {
                 writeln!(file, "    .word 0x{:08x}", instr)?;
             }
 
-            warn!(path = %file_path, "汇编文件已写入");
-            info!("提示：在 ESP-IDF 的 CMakeLists.txt 中添加此文件即可参与链接。");
+            warn!(path = %file_path, "Assembly file written");
+            info!("Hint: Add this file to ESP-IDF's CMakeLists.txt to participate in linking.");
         }
     }
 
     Ok(())
+}
+
+#[tracing::instrument(name = "read_from_stdin")]
+fn read_from_stdin() -> Result<Vec<u8>> {
+    let mut ebpf_dump: Vec<u8> = Vec::new();
+    for line in io::stdin().lock().lines() {
+        let line = line.context("Failed to read from stdin")?;
+        if line.trim().is_empty() {
+            break;
+        }
+        let hex = line.trim();
+        // Skip readelf offset labels
+        if hex.len() == 8 {
+            if let Ok(val) = u32::from_str_radix(hex, 16) {
+                if val == ebpf_dump.len() as u32 {
+                    debug!(offset = val, "Skipping readelf address label");
+                    continue;
+                }
+            }
+        }
+        if hex.len() % 2 != 0 {
+            bail!("The hexadecimal line length is not a multiple of 2: '{}'", hex);
+        }
+        for chunk in hex.as_bytes().chunks(2) {
+            let hi = (chunk[0] as char)
+                .to_digit(16)
+                .with_context(|| format!("Invalid hexadecimal character: {}", chunk[0] as char))?  as u8;
+            let lo = (chunk[1] as char)
+                .to_digit(16)
+                .with_context(|| format!("Invalid hexadecimal character: {}", chunk[1] as char))? as u8;
+            ebpf_dump.push((hi << 4) | lo);
+        }
+    }
+
+    if ebpf_dump.len() % 8 != 0 {
+        bail!("The input is not a multiple of 8 bytes, actual length: {}", ebpf_dump.len());
+    }
+
+    Ok(ebpf_dump)
+}
+
+#[tracing::instrument(name = "read_from_file", skip(path))]
+fn read_from_file(path: &str) -> Result<Vec<u8>> {
+    debug!("Reading object file from '{}'", path);
+    let file = fs::read(path)?;
+    let object = object::File::parse(&*file)?;
+    if let Some(section) = object.section_by_name("xdp") {
+        let asm_bytes = section.data()?;
+        debug!("Hex: {:02x?}", &asm_bytes[..asm_bytes.len().min(16)]);
+        Ok(asm_bytes.to_vec())
+    } else {
+        bail!("Cannot find .xdp section in the object file");
+    }
 }
