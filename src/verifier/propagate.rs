@@ -79,7 +79,7 @@ static int propagate_precision(struct bpf_verifier_env *env,
 			verbose(env, "\n");
 	}
 
-	err = __mark_chain_precision(env, cur, -1, changed);
+	err = inner_mark_chain_precision(env, cur, -1, changed);
 	if (err < 0)
 		return err;
 

@@ -9,14 +9,14 @@ pub fn add_fd_from_fd_array(env: &mut BpfVerifierEnv, fd: i32) -> Result<i32> {
 
     let map = __bpf_map_get(f);
     if !is_err(map) {
-        __add_used_map(env, map).context("__add_used_map failed")?;
+        inner_add_used_map(env, map).context("inner_add_used_map failed")?;
         return Ok(0);
     }
 
     let btf = __btf_get_by_fd(f);
     if !is_err(btf) {
         btf_get(btf);
-        return __add_used_btf(env, btf).context("__add_used_btf failed");
+        return inner_add_used_btf(env, btf).context("inner_add_used_btf failed");
     }
 
     verbose(env, format!("fd {fd} is not pointing to valid bpf_map or btf\n"));
@@ -279,5 +279,89 @@ pub fn add_used_map(env: &mut BpfVerifierEnv, fd: i32) -> Result<i32> {
         return Err(anyhow!("PTR_ERR(map): invalid bpf_map fd"));
     }
 
-    __add_used_map(env, map).context("__add_used_map failed")
+    inner_add_used_map(env, map).context("inner_add_used_map failed")
+}
+
+static int inner_add_used_btf(struct bpf_verifier_env *env, struct btf *btf)
+{
+	struct btf_mod_pair *btf_mod;
+	int ret = 0;
+	int i;
+
+	/* check whether we recorded this BTF (and maybe module) already */
+	for (i = 0; i < env->used_btf_cnt; i++)
+		if (env->used_btfs[i].btf == btf)
+			goto ret_put;
+
+	if (env->used_btf_cnt >= MAX_USED_BTFS) {
+		verbose(env, "The total number of btfs per program has reached the limit of %u\n",
+			MAX_USED_BTFS);
+		ret = -E2BIG;
+		goto ret_put;
+	}
+
+	btf_mod = &env->used_btfs[env->used_btf_cnt];
+	btf_mod->btf = btf;
+	btf_mod->module = NULL;
+
+	/* if we reference variables from kernel module, bump its refcount */
+	if (btf_is_module(btf)) {
+		btf_mod->module = btf_try_get_module(btf);
+		if (!btf_mod->module) {
+			ret = -ENXIO;
+			goto ret_put;
+		}
+	}
+
+	env->used_btf_cnt++;
+	return 0;
+
+ret_put:
+	/* Either error or this BTF was already added */
+	btf_put(btf);
+	return ret;
+}
+
+// Extracted from /Users/nan/bs/aot/src/verifier.c
+static int inner_add_used_map(struct bpf_verifier_env *env, struct bpf_map *map)
+{
+	int i, err;
+
+	/* check whether we recorded this map already */
+	for (i = 0; i < env->used_map_cnt; i++)
+		if (env->used_maps[i] == map)
+			return i;
+
+	if (env->used_map_cnt >= MAX_USED_MAPS) {
+		verbose(env, "The total number of maps per program has reached the limit of %u\n",
+			MAX_USED_MAPS);
+		return -E2BIG;
+	}
+
+	err = check_map_prog_compatibility(env, map, env->prog);
+	if (err)
+		return err;
+
+	if (env->prog->sleepable)
+		atomic64_inc(&map->sleepable_refcnt);
+
+	/* hold the map. If the program is rejected by verifier,
+	 * the map will be released by release_maps() or it
+	 * will be used by the valid program until it's unloaded
+	 * and all maps are released in bpf_free_used_maps()
+	 */
+	bpf_map_inc(map);
+
+	env->used_maps[env->used_map_cnt++] = map;
+
+	if (map->map_type == BPF_MAP_TYPE_INSN_ARRAY) {
+		err = bpf_insn_array_init(map, env->prog);
+		if (err) {
+			verbose(env, "Failed to properly initialize insn array\n");
+			return err;
+		}
+		env->insn_array_maps[env->insn_array_map_cnt++] = map;
+	}
+
+	return env->used_map_cnt - 1;
 }

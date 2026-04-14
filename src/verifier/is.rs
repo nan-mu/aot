@@ -193,7 +193,7 @@ static int is_branch_taken(struct bpf_reg_state *reg1, struct bpf_reg_state *reg
 	if (reg_is_pkt_pointer_any(reg1) && reg_is_pkt_pointer_any(reg2) && !is_jmp32)
 		return is_pkt_ptr_branch_taken(reg1, reg2, opcode);
 
-	if (__is_pointer_value(false, reg1) || __is_pointer_value(false, reg2)) {
+	if (inner_is_pointer_value(false, reg1) || inner_is_pointer_value(false, reg2)) {
 		u64 val;
 
 		/* arrange that reg2 is a scalar, and reg1 is a pointer */
@@ -906,7 +906,7 @@ static bool is_pkt_reg(struct bpf_verifier_env *env, int regno)
 // Extracted from /Users/nan/bs/aot/src/verifier.c
 static bool is_pointer_value(struct bpf_verifier_env *env, int regno)
 {
-	return __is_pointer_value(env->allow_ptr_leaks, reg_state(env, regno));
+	return inner_is_pointer_value(env->allow_ptr_leaks, reg_state(env, regno));
 }
 
 
@@ -1500,7 +1500,7 @@ static int is_state_visited(struct bpf_verifier_env *env, int insn_idx)
 					 * so we can assume valid iter and reg state,
 					 * no need for extra (re-)validations
 					 */
-					spi = __get_spi(iter_reg->off + iter_reg->var_off.value);
+					spi = inner_get_spi(iter_reg->off + iter_reg->var_off.value);
 					iter_state = &func(env, iter_reg)->stack[spi].spilled_ptr;
 					if (iter_state->iter.state == BPF_ITER_STATE_ACTIVE) {
 						loop = true;
@@ -1722,7 +1722,7 @@ miss:
 	env->prev_jmps_processed = env->jmps_processed;
 	env->prev_insn_processed = env->insn_processed;
 
-	/* forget precise markings we inherited, see __mark_chain_precision */
+	/* forget precise markings we inherited, see inner_mark_chain_precision */
 	if (env->bpf_capable)
 		mark_all_scalars_imprecise(env, cur);
 
@@ -1832,4 +1832,13 @@ static bool is_trusted_reg(const struct bpf_reg_state *reg)
 	       !bpf_type_has_unsafe_modifiers(reg->type);
 }
 
+// Extracted from /Users/nan/bs/aot/src/verifier.c
+static bool inner_is_pointer_value(bool allow_ptr_leaks,
+	const struct bpf_reg_state *reg)
+{
+if (allow_ptr_leaks)
+return false;
+
+return reg->type != SCALAR_VALUE;
+}
 

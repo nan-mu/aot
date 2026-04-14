@@ -20,7 +20,7 @@ static void clear_caller_saved_regs(struct bpf_verifier_env *env,
 	/* after the call registers r0 - r5 were scratched */
 	for (i = 0; i < CALLER_SAVED_REGS; i++) {
 		mark_reg_not_init(env, regs, caller_saved[i]);
-		__check_reg_arg(env, regs, caller_saved[i], DST_OP_NO_MARK);
+		inner_check_reg_arg(env, regs, caller_saved[i], DST_OP_NO_MARK);
 	}
 }
 

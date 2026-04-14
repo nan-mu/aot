@@ -131,7 +131,7 @@ static void regs_refine_cond_op(struct bpf_reg_state *reg1, struct bpf_reg_state
 		/* Forget the ranges before narrowing tnums, to avoid invariant
 		 * violations if we're on a dead branch.
 		 */
-		__mark_reg_unbounded(reg1);
+		inner_mark_reg_unbounded(reg1);
 		if (is_jmp32) {
 			t = tnum_and(tnum_subreg(reg1->var_off), tnum_const(~val));
 			reg1->var_off = tnum_with_subreg(reg1->var_off, t);

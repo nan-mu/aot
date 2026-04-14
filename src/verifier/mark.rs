@@ -42,7 +42,7 @@ static void mark_all_scalars_precise(struct bpf_verifier_env *env,
 	 * pop_stack may still get !precise scalars.
 	 * We also skip current state and go straight to first parent state,
 	 * because precision markings in current non-checkpointed state are
-	 * not needed. See why in the comment in __mark_chain_precision below.
+	 * not needed. See why in the comment in inner_mark_chain_precision below.
 	 */
 	for (st = st->parent; st; st = st->parent) {
 		for (i = 0; i <= st->curframe; i++) {
@@ -78,7 +78,7 @@ static void mark_all_scalars_precise(struct bpf_verifier_env *env,
 static void mark_btf_func_reg_size(struct bpf_verifier_env *env, u32 regno,
 				   size_t reg_size)
 {
-	return __mark_btf_func_reg_size(env, cur_regs(env), regno, reg_size);
+	return inner_mark_btf_func_reg_size(env, cur_regs(env), regno, reg_size);
 }
 
 
@@ -123,7 +123,7 @@ static void mark_calls_callback(struct bpf_verifier_env *env, int idx)
 // Extracted from /Users/nan/bs/aot/src/verifier.c
 int mark_chain_precision(struct bpf_verifier_env *env, int regno)
 {
-	return __mark_chain_precision(env, env->cur_state, regno, NULL);
+	return inner_mark_chain_precision(env, env->cur_state, regno, NULL);
 }
 
 
@@ -131,7 +131,7 @@ int mark_chain_precision(struct bpf_verifier_env *env, int regno)
 static int mark_chain_precision_batch(struct bpf_verifier_env *env,
 				      struct bpf_verifier_state *starting_state)
 {
-	return __mark_chain_precision(env, starting_state, -1, NULL);
+	return inner_mark_chain_precision(env, starting_state, -1, NULL);
 }
 
 
@@ -140,7 +140,7 @@ static void mark_dynptr_cb_reg(struct bpf_verifier_env *env,
 			       struct bpf_reg_state *reg,
 			       enum bpf_dynptr_type type)
 {
-	__mark_dynptr_reg(reg, type, true, ++env->id_gen);
+	inner_mark_dynptr_reg(reg, type, true, ++env->id_gen);
 }
 
 
@@ -174,8 +174,8 @@ static void mark_dynptr_stack_regs(struct bpf_verifier_env *env,
 {
 	int id = ++env->id_gen;
 
-	__mark_dynptr_reg(sreg1, type, true, id);
-	__mark_dynptr_reg(sreg2, type, false, id);
+	inner_mark_dynptr_reg(sreg1, type, true, id);
+	inner_mark_dynptr_reg(sreg2, type, false, id);
 }
 
 
@@ -483,7 +483,7 @@ static void mark_ptr_or_null_regs(struct bpf_verifier_state *vstate, u32 regno,
 static void mark_reg_graph_node(struct bpf_reg_state *regs, u32 regno,
 				struct btf_field_graph_root *ds_head)
 {
-	__mark_reg_known_zero(&regs[regno]);
+	inner_mark_reg_known_zero(&regs[regno]);
 	regs[regno].type = PTR_TO_BTF_ID | MEM_ALLOC;
 	regs[regno].btf = ds_head->btf;
 	regs[regno].btf_id = ds_head->value_btf_id;
@@ -495,9 +495,9 @@ static void mark_reg_graph_node(struct bpf_reg_state *regs, u32 regno,
 static void mark_reg_invalid(const struct bpf_verifier_env *env, struct bpf_reg_state *reg)
 {
 	if (!env->allow_ptr_leaks)
-		__mark_reg_not_init(env, reg);
+		inner_mark_reg_not_init(env, reg);
 	else
-		__mark_reg_unknown(env, reg);
+		inner_mark_reg_unknown(env, reg);
 }
 
 
@@ -509,10 +509,10 @@ static void mark_reg_known_zero(struct bpf_verifier_env *env,
 		verbose(env, "mark_reg_known_zero(regs, %u)\n", regno);
 		/* Something bad happened, let's kill all regs */
 		for (regno = 0; regno < MAX_BPF_REG; regno++)
-			__mark_reg_not_init(env, regs + regno);
+			inner_mark_reg_not_init(env, regs + regno);
 		return;
 	}
-	__mark_reg_known_zero(regs + regno);
+	inner_mark_reg_known_zero(regs + regno);
 }
 
 
@@ -524,10 +524,10 @@ static void mark_reg_not_init(struct bpf_verifier_env *env,
 		verbose(env, "mark_reg_not_init(regs, %u)\n", regno);
 		/* Something bad happened, let's kill all regs except FP */
 		for (regno = 0; regno < BPF_REG_FP; regno++)
-			__mark_reg_not_init(env, regs + regno);
+			inner_mark_reg_not_init(env, regs + regno);
 		return;
 	}
-	__mark_reg_not_init(env, regs + regno);
+	inner_mark_reg_not_init(env, regs + regno);
 }
 
 
@@ -556,7 +556,7 @@ static void mark_reg_stack_read(struct bpf_verifier_env *env,
 		/* Any access_size read into register is zero extended,
 		 * so the whole register == const_zero.
 		 */
-		__mark_reg_const_zero(env, &state->regs[dst_regno]);
+		inner_mark_reg_const_zero(env, &state->regs[dst_regno]);
 	} else {
 		/* have read misc data from the stack */
 		mark_reg_unknown(env, state->regs, dst_regno);
@@ -572,10 +572,10 @@ static void mark_reg_unknown(struct bpf_verifier_env *env,
 		verbose(env, "mark_reg_unknown(regs, %u)\n", regno);
 		/* Something bad happened, let's kill all regs except FP */
 		for (regno = 0; regno < BPF_REG_FP; regno++)
-			__mark_reg_not_init(env, regs + regno);
+			inner_mark_reg_not_init(env, regs + regno);
 		return;
 	}
-	__mark_reg_unknown(env, regs + regno);
+	inner_mark_reg_unknown(env, regs + regno);
 }
 
 
@@ -602,7 +602,7 @@ static int mark_stack_slot_irq_flag(struct bpf_verifier_env *env,
 	st = &slot->spilled_ptr;
 
 	bpf_mark_stack_write(env, reg->frameno, BIT(spi));
-	__mark_reg_known_zero(st);
+	inner_mark_reg_known_zero(st);
 	st->type = PTR_TO_STACK; /* we don't have dedicated reg type */
 	st->ref_obj_id = id;
 	st->irq.kfunc_class = kfunc_class;
@@ -725,7 +725,7 @@ static int mark_stack_slots_iter(struct bpf_verifier_env *env,
 		struct bpf_stack_state *slot = &state->stack[spi - i];
 		struct bpf_reg_state *st = &slot->spilled_ptr;
 
-		__mark_reg_known_zero(st);
+		inner_mark_reg_known_zero(st);
 		st->type = PTR_TO_STACK; /* we don't have dedicated reg type */
 		if (is_kfunc_rcu_protected(meta)) {
 			if (in_rcu_cs(env))
@@ -798,4 +798,351 @@ static int mark_uptr_ld_reg(struct bpf_verifier_env *env, u32 regno,
 	return 0;
 }
 
+static void iinner_mark_reg_known(struct bpf_reg_state *reg, u64 imm)
+{
+	reg->var_off = tnum_const(imm);
+	reg->smin_value = (s64)imm;
+	reg->smax_value = (s64)imm;
+	reg->umin_value = imm;
+	reg->umax_value = imm;
 
+	reg->s32_min_value = (s32)imm;
+	reg->s32_max_value = (s32)imm;
+	reg->u32_min_value = (u32)imm;
+	reg->u32_max_value = (u32)imm;
+}
+
+static void inner_mark_reg32_known(struct bpf_reg_state *reg, u64 imm)
+{
+	reg->var_off = tnum_const_subreg(reg->var_off, imm);
+	reg->s32_min_value = (s32)imm;
+	reg->s32_max_value = (s32)imm;
+	reg->u32_min_value = (u32)imm;
+	reg->u32_max_value = (u32)imm;
+}
+
+static void inner_mark_reg32_unbounded(struct bpf_reg_state *reg)
+{
+	reg->s32_min_value = S32_MIN;
+	reg->s32_max_value = S32_MAX;
+	reg->u32_min_value = 0;
+	reg->u32_max_value = U32_MAX;
+}
+
+static void inner_mark_reg64_unbounded(struct bpf_reg_state *reg)
+{
+	reg->smin_value = S64_MIN;
+	reg->smax_value = S64_MAX;
+	reg->umin_value = 0;
+	reg->umax_value = U64_MAX;
+}
+
+static void inner_mark_reg_known(struct bpf_reg_state *reg, u64 imm)
+{
+	/* Clear off and union(map_ptr, range) */
+	memset(((u8 *)reg) + sizeof(reg->type), 0,
+	       offsetof(struct bpf_reg_state, var_off) - sizeof(reg->type));
+	reg->id = 0;
+	reg->ref_obj_id = 0;
+	iinner_mark_reg_known(reg, imm);
+}
+
+// Extracted from /Users/nan/bs/aot/src/verifier.c
+static int inner_mark_reg_s32_range(struct bpf_verifier_env *env,
+				struct bpf_reg_state *regs,
+				u32 regno,
+				s32 s32_min,
+				s32 s32_max)
+{
+	struct bpf_reg_state *reg = regs + regno;
+
+	reg->s32_min_value = max_t(s32, reg->s32_min_value, s32_min);
+	reg->s32_max_value = min_t(s32, reg->s32_max_value, s32_max);
+
+	reg->smin_value = max_t(s64, reg->smin_value, s32_min);
+	reg->smax_value = min_t(s64, reg->smax_value, s32_max);
+
+	reg_bounds_sync(reg);
+
+	return reg_bounds_sanity_check(env, reg, "s32_range");
+}
+
+static void inner_mark_reg_unbounded(struct bpf_reg_state *reg)
+{
+	reg->smin_value = S64_MIN;
+	reg->smax_value = S64_MAX;
+	reg->umin_value = 0;
+	reg->umax_value = U64_MAX;
+
+	reg->s32_min_value = S32_MIN;
+	reg->s32_max_value = S32_MAX;
+	reg->u32_min_value = 0;
+	reg->u32_max_value = U32_MAX;
+}
+
+static void inner_mark_reg_unknown_imprecise(struct bpf_reg_state *reg)
+{
+	/*
+	 * Clear type, off, and union(map_ptr, range) and
+	 * padding between 'type' and union
+	 */
+	memset(reg, 0, offsetof(struct bpf_reg_state, var_off));
+	reg->type = SCALAR_VALUE;
+	reg->id = 0;
+	reg->ref_obj_id = 0;
+	reg->var_off = tnum_unknown;
+	reg->frameno = 0;
+	reg->precise = false;
+	inner_mark_reg_unbounded(reg);
+}
+
+// Extracted from /Users/nan/bs/aot/src/verifier.c
+static void inner_mark_btf_func_reg_size(struct bpf_verifier_env *env, struct bpf_reg_state *regs,
+				     u32 regno, size_t reg_size)
+{
+	struct bpf_reg_state *reg = &regs[regno];
+
+	if (regno == BPF_REG_0) {
+		/* Function return value */
+		reg->subreg_def = reg_size == sizeof(u64) ?
+			DEF_NOT_SUBREG : env->insn_idx + 1;
+	} else if (reg_size == sizeof(u64)) {
+		/* Function argument */
+		mark_insn_zext(env, reg);
+	}
+}
+
+// Extracted from /Users/nan/bs/aot/src/verifier.c
+static int inner_mark_chain_precision(struct bpf_verifier_env *env,
+				  struct bpf_verifier_state *starting_state,
+				  int regno,
+				  bool *changed)
+{
+	struct bpf_verifier_state *st = starting_state;
+	struct backtrack_state *bt = &env->bt;
+	int first_idx = st->first_insn_idx;
+	int last_idx = starting_state->insn_idx;
+	int subseq_idx = -1;
+	struct bpf_func_state *func;
+	bool tmp, skip_first = true;
+	struct bpf_reg_state *reg;
+	int i, fr, err;
+
+	if (!env->bpf_capable)
+		return 0;
+
+	changed = changed ?: &tmp;
+	/* set frame number from which we are starting to backtrack */
+	bt_init(bt, starting_state->curframe);
+
+	/* Do sanity checks against current state of register and/or stack
+	 * slot, but don't set precise flag in current state, as precision
+	 * tracking in the current state is unnecessary.
+	 */
+	func = st->frame[bt->frame];
+	if (regno >= 0) {
+		reg = &func->regs[regno];
+		if (reg->type != SCALAR_VALUE) {
+			verifier_bug(env, "backtracking misuse");
+			return -EFAULT;
+		}
+		bt_set_reg(bt, regno);
+	}
+
+	if (bt_empty(bt))
+		return 0;
+
+	for (;;) {
+		DECLARE_BITMAP(mask, 64);
+		u32 history = st->jmp_history_cnt;
+		struct bpf_jmp_history_entry *hist;
+
+		if (env->log.level & BPF_LOG_LEVEL2) {
+			verbose(env, "mark_precise: frame%d: last_idx %d first_idx %d subseq_idx %d \n",
+				bt->frame, last_idx, first_idx, subseq_idx);
+		}
+
+		if (last_idx < 0) {
+			/* we are at the entry into subprog, which
+			 * is expected for global funcs, but only if
+			 * requested precise registers are R1-R5
+			 * (which are global func's input arguments)
+			 */
+			if (st->curframe == 0 &&
+			    st->frame[0]->subprogno > 0 &&
+			    st->frame[0]->callsite == BPF_MAIN_FUNC &&
+			    bt_stack_mask(bt) == 0 &&
+			    (bt_reg_mask(bt) & ~BPF_REGMASK_ARGS) == 0) {
+				bitmap_from_u64(mask, bt_reg_mask(bt));
+				for_each_set_bit(i, mask, 32) {
+					reg = &st->frame[0]->regs[i];
+					bt_clear_reg(bt, i);
+					if (reg->type == SCALAR_VALUE) {
+						reg->precise = true;
+						*changed = true;
+					}
+				}
+				return 0;
+			}
+
+			verifier_bug(env, "backtracking func entry subprog %d reg_mask %x stack_mask %llx",
+				     st->frame[0]->subprogno, bt_reg_mask(bt), bt_stack_mask(bt));
+			return -EFAULT;
+		}
+
+		for (i = last_idx;;) {
+			if (skip_first) {
+				err = 0;
+				skip_first = false;
+			} else {
+				hist = get_jmp_hist_entry(st, history, i);
+				err = backtrack_insn(env, i, subseq_idx, hist, bt);
+			}
+			if (err == -ENOTSUPP) {
+				mark_all_scalars_precise(env, starting_state);
+				bt_reset(bt);
+				return 0;
+			} else if (err) {
+				return err;
+			}
+			if (bt_empty(bt))
+				/* Found assignment(s) into tracked register in this state.
+				 * Since this state is already marked, just return.
+				 * Nothing to be tracked further in the parent state.
+				 */
+				return 0;
+			subseq_idx = i;
+			i = get_prev_insn_idx(st, i, &history);
+			if (i == -ENOENT)
+				break;
+			if (i >= env->prog->len) {
+				/* This can happen if backtracking reached insn 0
+				 * and there are still reg_mask or stack_mask
+				 * to backtrack.
+				 * It means the backtracking missed the spot where
+				 * particular register was initialized with a constant.
+				 */
+				verifier_bug(env, "backtracking idx %d", i);
+				return -EFAULT;
+			}
+		}
+		st = st->parent;
+		if (!st)
+			break;
+
+		for (fr = bt->frame; fr >= 0; fr--) {
+			func = st->frame[fr];
+			bitmap_from_u64(mask, bt_frame_reg_mask(bt, fr));
+			for_each_set_bit(i, mask, 32) {
+				reg = &func->regs[i];
+				if (reg->type != SCALAR_VALUE) {
+					bt_clear_frame_reg(bt, fr, i);
+					continue;
+				}
+				if (reg->precise) {
+					bt_clear_frame_reg(bt, fr, i);
+				} else {
+					reg->precise = true;
+					*changed = true;
+				}
+			}
+
+			bitmap_from_u64(mask, bt_frame_stack_mask(bt, fr));
+			for_each_set_bit(i, mask, 64) {
+				if (verifier_bug_if(i >= func->allocated_stack / BPF_REG_SIZE,
+						    env, "stack slot %d, total slots %d",
+						    i, func->allocated_stack / BPF_REG_SIZE))
+					return -EFAULT;
+
+				if (!is_spilled_scalar_reg(&func->stack[i])) {
+					bt_clear_frame_slot(bt, fr, i);
+					continue;
+				}
+				reg = &func->stack[i].spilled_ptr;
+				if (reg->precise) {
+					bt_clear_frame_slot(bt, fr, i);
+				} else {
+					reg->precise = true;
+					*changed = true;
+				}
+			}
+			if (env->log.level & BPF_LOG_LEVEL2) {
+				fmt_reg_mask(env->tmp_str_buf, TMP_STR_BUF_LEN,
+					     bt_frame_reg_mask(bt, fr));
+				verbose(env, "mark_precise: frame%d: parent state regs=%s ",
+					fr, env->tmp_str_buf);
+				bpf_fmt_stack_mask(env->tmp_str_buf, TMP_STR_BUF_LEN,
+					       bt_frame_stack_mask(bt, fr));
+				verbose(env, "stack=%s: ", env->tmp_str_buf);
+				print_verifier_state(env, st, fr, true);
+			}
+		}
+
+		if (bt_empty(bt))
+			return 0;
+
+		subseq_idx = first_idx;
+		last_idx = st->last_insn_idx;
+		first_idx = st->first_insn_idx;
+	}
+
+	/* if we still have requested precise regs or slots, we missed
+	 * something (e.g., stack access through non-r10 register), so
+	 * fallback to marking all precise
+	 */
+	if (!bt_empty(bt)) {
+		mark_all_scalars_precise(env, starting_state);
+		bt_reset(bt);
+	}
+
+	return 0;
+}
+
+// Extracted from /Users/nan/bs/aot/src/verifier.c
+static void inner_mark_dynptr_reg(struct bpf_reg_state *reg, enum bpf_dynptr_type type,
+			      bool first_slot, int dynptr_id)
+{
+	/* reg->type has no meaning for STACK_DYNPTR, but when we set reg for
+	 * callback arguments, it does need to be CONST_PTR_TO_DYNPTR, so simply
+	 * set it unconditionally as it is ignored for STACK_DYNPTR anyway.
+	 */
+	inner_mark_reg_known_zero(reg);
+	reg->type = CONST_PTR_TO_DYNPTR;
+	/* Give each dynptr a unique id to uniquely associate slices to it. */
+	reg->id = dynptr_id;
+	reg->dynptr.type = type;
+	reg->dynptr.first_slot = first_slot;
+}
+
+// Extracted from /Users/nan/bs/aot/src/verifier.c
+static void inner_mark_reg_const_zero(const struct bpf_verifier_env *env, struct bpf_reg_state *reg)
+{
+	inner_mark_reg_known(reg, 0);
+	reg->type = SCALAR_VALUE;
+	/* all scalars are assumed imprecise initially (unless unprivileged,
+	 * in which case everything is forced to be precise)
+	 */
+	reg->precise = !env->bpf_capable;
+}
+
+// Extracted from /Users/nan/bs/aot/src/verifier.c
+static void inner_mark_reg_known_zero(struct bpf_reg_state *reg)
+{
+	inner_mark_reg_known(reg, 0);
+}
+
+// Extracted from /Users/nan/bs/aot/src/verifier.c
+static void inner_mark_reg_not_init(const struct bpf_verifier_env *env,
+				struct bpf_reg_state *reg)
+{
+	inner_mark_reg_unknown(env, reg);
+	reg->type = NOT_INIT;
+}
+
+// Extracted from /Users/nan/bs/aot/src/verifier.c
+static void inner_mark_reg_unknown(const struct bpf_verifier_env *env,
+			       struct bpf_reg_state *reg)
+{
+	inner_mark_reg_unknown_imprecise(reg);
+	reg->precise = !env->bpf_capable;
+}

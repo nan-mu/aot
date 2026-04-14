@@ -128,13 +128,13 @@ pub fn adjust_ptr_min_max_vals(
         || off_reg.smin_value > off_reg.smax_value
         || off_reg.umin_value > off_reg.umax_value
     {
-        __mark_reg_unknown(env, dst_reg);
+        inner_mark_reg_unknown(env, dst_reg);
         return Ok(0);
     }
 
     if bpf_class(insn.code) != BPF_ALU64 {
         if bpf_op(insn.code) == BPF_SUB && env.allow_ptr_leaks {
-            __mark_reg_unknown(env, dst_reg);
+            inner_mark_reg_unknown(env, dst_reg);
             return Ok(0);
         }
         return Err(anyhow!("-EACCES: 32-bit pointer arithmetic prohibited"));
@@ -149,7 +149,7 @@ pub fn adjust_ptr_min_max_vals(
     // Keep semantics shallow but preserve verifier flow contracts.
     dst_reg.r#type = ptr_reg.r#type;
     dst_reg.id = ptr_reg.id;
-    __mark_reg32_unbounded(dst_reg);
+    inner_mark_reg32_unbounded(dst_reg);
 
     let bounds_ret = sanitize_check_bounds(env, insn, dst_reg);
     if bounds_ret == -13 {
@@ -192,7 +192,7 @@ pub fn adjust_scalar_min_max_vals(
     let alu32 = bpf_class(insn.code) != BPF_ALU64;
 
     if !is_safe_to_compute_dst_reg_range(insn, &src_reg) {
-        __mark_reg_unknown(env, dst_reg);
+        inner_mark_reg_unknown(env, dst_reg);
         return Ok(0);
     }
 
@@ -216,7 +216,7 @@ pub fn adjust_scalar_min_max_vals(
         }
         BPF_NEG => {
             env.fake_reg[0] = dst_reg.clone();
-            __mark_reg_known(dst_reg, 0);
+            inner_mark_reg_known(dst_reg, 0);
             scalar32_min_max_sub(dst_reg, &env.fake_reg[0]);
             scalar_min_max_sub(dst_reg, &env.fake_reg[0]);
             dst_reg.var_off = tnum_neg(env.fake_reg[0].var_off);

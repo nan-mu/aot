@@ -307,7 +307,7 @@ get_kfunc_ptr_arg_type(struct bpf_verifier_env *env,
 	 * pointer to scalar, or struct composed (recursively) of scalars. When
 	 * arg_mem_size is true, the pointer can be void *.
 	 */
-	if (!btf_type_is_scalar(ref_t) && !__btf_type_is_scalar_struct(env, meta->btf, ref_t, 0) &&
+	if (!btf_type_is_scalar(ref_t) && !inner_btf_type_is_scalar_struct(env, meta->btf, ref_t, 0) &&
 	    (arg_mem_size ? !btf_type_is_void(ref_t) : 1)) {
 		verbose(env, "arg#%d pointer type %s %s must point to %sscalar, or struct with scalar\n",
 			argno, btf_type_str(ref_t), ref_tname, arg_mem_size ? "void, " : "");
@@ -346,4 +346,7 @@ static int get_reg_width(struct bpf_reg_state *reg)
 	return fls64(reg->umax_value);
 }
 
-
+static int inner_get_spi(s32 off)
+{
+	return (-off - 1) / BPF_REG_SIZE;
+}

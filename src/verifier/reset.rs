@@ -11,7 +11,7 @@ static void reset_idmap_scratch(struct bpf_verifier_env *env)
 // Extracted from /Users/nan/bs/aot/src/verifier.c
 static void reset_reg32_and_tnum(struct bpf_reg_state *reg)
 {
-	__mark_reg32_unbounded(reg);
+	inner_mark_reg32_unbounded(reg);
 	reg->var_off = tnum_unknown;
 }
 
@@ -19,7 +19,7 @@ static void reset_reg32_and_tnum(struct bpf_reg_state *reg)
 // Extracted from /Users/nan/bs/aot/src/verifier.c
 static void reset_reg64_and_tnum(struct bpf_reg_state *reg)
 {
-	__mark_reg64_unbounded(reg);
+	inner_mark_reg64_unbounded(reg);
 	reg->var_off = tnum_unknown;
 }
 

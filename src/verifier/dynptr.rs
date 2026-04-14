@@ -15,7 +15,7 @@ static enum bpf_dynptr_type dynptr_get_type(struct bpf_verifier_env *env,
 	if (reg->type == CONST_PTR_TO_DYNPTR)
 		return reg->dynptr.type;
 
-	spi = __get_spi(reg->off);
+	spi = inner_get_spi(reg->off);
 	if (spi < 0) {
 		verbose(env, "verifier internal error: invalid spi when querying dynptr type\n");
 		return BPF_DYNPTR_TYPE_INVALID;

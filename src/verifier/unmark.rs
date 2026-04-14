@@ -40,7 +40,7 @@ static int unmark_stack_slot_irq_flag(struct bpf_verifier_env *env, struct bpf_r
 		return err;
 	}
 
-	__mark_reg_not_init(env, st);
+	inner_mark_reg_not_init(env, st);
 
 	bpf_mark_stack_write(env, reg->frameno, BIT(spi));
 
@@ -127,7 +127,7 @@ static int unmark_stack_slots_iter(struct bpf_verifier_env *env,
 		if (i == 0)
 			WARN_ON_ONCE(release_reference(env, st->ref_obj_id));
 
-		__mark_reg_not_init(env, st);
+		inner_mark_reg_not_init(env, st);
 
 		for (j = 0; j < BPF_REG_SIZE; j++)
 			slot->slot_type[j] = STACK_INVALID;

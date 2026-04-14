@@ -45,8 +45,8 @@ static int destroy_if_dynptr_stack_slot(struct bpf_verifier_env *env,
 	/* Do not release reference state, we are destroying dynptr on stack,
 	 * not using some helper to release it. Just reset register.
 	 */
-	__mark_reg_not_init(env, &state->stack[spi].spilled_ptr);
-	__mark_reg_not_init(env, &state->stack[spi - 1].spilled_ptr);
+	inner_mark_reg_not_init(env, &state->stack[spi].spilled_ptr);
+	inner_mark_reg_not_init(env, &state->stack[spi - 1].spilled_ptr);
 
 	bpf_mark_stack_write(env, state->frameno, BIT(spi - 1) | BIT(spi));
 

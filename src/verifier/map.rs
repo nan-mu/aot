@@ -31,7 +31,7 @@ static int map_kptr_match_type(struct bpf_verifier_env *env,
 	 * Since ref_ptr cannot be accessed directly by BPF insns, checks for
 	 * reg->off and reg->ref_obj_id are not needed here.
 	 */
-	if (__check_ptr_off_reg(env, reg, regno, true))
+	if (inner_check_ptr_off_reg(env, reg, regno, true))
 		return -EACCES;
 
 	/* A full type match is needed, as BTF can be vmlinux, module or prog BTF, and
@@ -99,18 +99,18 @@ int map_set_for_each_callback_args(struct bpf_verifier_env *env,
 	callee->regs[BPF_REG_1] = caller->regs[BPF_REG_1];
 
 	callee->regs[BPF_REG_2].type = PTR_TO_MAP_KEY;
-	__mark_reg_known_zero(&callee->regs[BPF_REG_2]);
+	inner_mark_reg_known_zero(&callee->regs[BPF_REG_2]);
 	callee->regs[BPF_REG_2].map_ptr = caller->regs[BPF_REG_1].map_ptr;
 
 	callee->regs[BPF_REG_3].type = PTR_TO_MAP_VALUE;
-	__mark_reg_known_zero(&callee->regs[BPF_REG_3]);
+	inner_mark_reg_known_zero(&callee->regs[BPF_REG_3]);
 	callee->regs[BPF_REG_3].map_ptr = caller->regs[BPF_REG_1].map_ptr;
 
 	/* pointer to stack or null */
 	callee->regs[BPF_REG_4] = caller->regs[BPF_REG_3];
 
 	/* unused */
-	__mark_reg_not_init(env, &callee->regs[BPF_REG_5]);
+	inner_mark_reg_not_init(env, &callee->regs[BPF_REG_5]);
 	return 0;
 }
 

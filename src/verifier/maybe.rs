@@ -81,11 +81,11 @@ static int maybe_fork_scalars(struct bpf_verifier_env *env, struct bpf_insn *ins
 
 	regs = branch->frame[branch->curframe]->regs;
 	if (alu32) {
-		__mark_reg32_known(&regs[insn->dst_reg], 0);
-		__mark_reg32_known(dst_reg, -1ull);
+		inner_mark_reg32_known(&regs[insn->dst_reg], 0);
+		inner_mark_reg32_known(dst_reg, -1ull);
 	} else {
-		__mark_reg_known(&regs[insn->dst_reg], 0);
-		__mark_reg_known(dst_reg, -1ull);
+		inner_mark_reg_known(&regs[insn->dst_reg], 0);
+		inner_mark_reg_known(dst_reg, -1ull);
 	}
 	return 0;
 }
@@ -116,7 +116,7 @@ static void maybe_widen_reg(struct bpf_verifier_env *env,
 		return;
 	if (rold->precise || rcur->precise || scalars_exact_for_widen(rold, rcur))
 		return;
-	__mark_reg_unknown(env, rcur);
+	inner_mark_reg_unknown(env, rcur);
 }
 
 

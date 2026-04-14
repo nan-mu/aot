@@ -23,7 +23,7 @@ static void coerce_reg_to_size(struct bpf_reg_state *reg, int size)
 	 * 32-bit bounds. Above were truncated < 32-bits already.
 	 */
 	if (size < 4)
-		__mark_reg32_unbounded(reg);
+		inner_mark_reg32_unbounded(reg);
 
 	reg_bounds_sync(reg);
 }

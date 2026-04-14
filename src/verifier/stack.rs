@@ -15,7 +15,7 @@ static int stack_slot_obj_get_spi(struct bpf_verifier_env *env, struct bpf_reg_s
 		return -EINVAL;
 	}
 
-	spi = __get_spi(off);
+	spi = inner_get_spi(off);
 	if (spi + 1 < nr_slots) {
 		verbose(env, "cannot pass in %s at an offset=%d\n", obj_kind, off);
 		return -EINVAL;

@@ -8,8 +8,8 @@ static void invalidate_dynptr(struct bpf_verifier_env *env, struct bpf_func_stat
 		state->stack[spi - 1].slot_type[i] = STACK_INVALID;
 	}
 
-	__mark_reg_not_init(env, &state->stack[spi].spilled_ptr);
-	__mark_reg_not_init(env, &state->stack[spi - 1].spilled_ptr);
+	inner_mark_reg_not_init(env, &state->stack[spi].spilled_ptr);
+	inner_mark_reg_not_init(env, &state->stack[spi - 1].spilled_ptr);
 
 	bpf_mark_stack_write(env, state->frameno, BIT(spi - 1) | BIT(spi));
 }
