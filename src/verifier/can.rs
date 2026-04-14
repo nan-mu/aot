@@ -1,23 +1,19 @@
-// Extracted from /Users/nan/bs/aot/src/verifier.c
-static bool can_elide_value_nullness(enum bpf_map_type type)
-{
-	switch (type) {
-	case BPF_MAP_TYPE_ARRAY:
-	case BPF_MAP_TYPE_PERCPU_ARRAY:
-		return true;
-	default:
-		return false;
-	}
-}
+//! Missing types: BpfMapType, BpfVerifierEnv, BpfInsn
 
+use anyhow::Result;
+use tracing::instrument;
 
 // Extracted from /Users/nan/bs/aot/src/verifier.c
-static bool can_skip_alu_sanitation(const struct bpf_verifier_env *env,
-				    const struct bpf_insn *insn)
-{
-	return env->bypass_spec_v1 ||
-		BPF_SRC(insn->code) == BPF_K ||
-		cur_aux(env)->nospec;
+#[instrument]
+pub fn can_elide_value_nullness(r#type: BpfMapType) -> Result<bool> {
+    match r#type {
+        BPF_MAP_TYPE_ARRAY | BPF_MAP_TYPE_PERCPU_ARRAY => Ok(true),
+        _ => Ok(false),
+    }
 }
 
-
+// Extracted from /Users/nan/bs/aot/src/verifier.c
+#[instrument(skip(env, insn))]
+pub fn can_skip_alu_sanitation(env: &BpfVerifierEnv, insn: &BpfInsn) -> Result<bool> {
+    Ok(env.bypass_spec_v1 || BPF_SRC(insn.code) == BPF_K || cur_aux(env).nospec)
+}
