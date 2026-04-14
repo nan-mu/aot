@@ -3,6 +3,7 @@
 use anyhow::{anyhow, Result};
 use tracing::instrument;
 
+/// Manual inspection passed
 #[instrument(skip(env))]
 pub fn acquire_irq_state(env: &mut BpfVerifierEnv, insn_idx: i32) -> Result<i32> {
     let s = acquire_reference_state(env, insn_idx)
@@ -16,6 +17,7 @@ pub fn acquire_irq_state(env: &mut BpfVerifierEnv, insn_idx: i32) -> Result<i32>
     Ok(s.id)
 }
 
+/// Manual inspection passed
 #[instrument(skip(env, ptr))]
 pub fn acquire_lock_state(
     env: &mut BpfVerifierEnv,
@@ -37,6 +39,7 @@ pub fn acquire_lock_state(
     Ok(())
 }
 
+/// Manual inspection passed
 #[instrument(skip(env))]
 pub fn acquire_reference(env: &mut BpfVerifierEnv, insn_idx: i32) -> Result<i32> {
     let s = acquire_reference_state(env, insn_idx)
@@ -47,6 +50,7 @@ pub fn acquire_reference(env: &mut BpfVerifierEnv, insn_idx: i32) -> Result<i32>
     Ok(s.id)
 }
 
+// 最好不要用Option，
 #[instrument(skip(env))]
 pub fn acquire_reference_state(
     env: &mut BpfVerifierEnv,
