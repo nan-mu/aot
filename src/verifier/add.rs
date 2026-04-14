@@ -1,305 +1,283 @@
-// Extracted from /Users/nan/bs/aot/src/verifier.c
-static int add_fd_from_fd_array(struct bpf_verifier_env *env, int fd)
-{
-	struct bpf_map *map;
-	struct btf *btf;
-	CLASS(fd, f)(fd);
-	int err;
+//! Missing types: BpfVerifierEnv, BpfMap, Btf, BpfSubprogInfo, BpfProg, BpfInsn, BpfKfuncBtfTab, BtfFuncModel, BpfKfuncDescTab, BpfProgAux, BpfKfuncMeta, BpfKfuncDesc, BpfSccBackedge, BpfVerifierState, BpfSccCallchain, BpfSccVisit
 
-	map = __bpf_map_get(f);
-	if (!IS_ERR(map)) {
-		err = __add_used_map(env, map);
-		if (err < 0)
-			return err;
-		return 0;
-	}
+use anyhow::{anyhow, Context, Result};
+use tracing::instrument;
 
-	btf = __btf_get_by_fd(f);
-	if (!IS_ERR(btf)) {
-		btf_get(btf);
-		return __add_used_btf(env, btf);
-	}
+#[instrument(skip(env))]
+pub fn add_fd_from_fd_array(env: &mut BpfVerifierEnv, fd: i32) -> Result<i32> {
+    let f = fd;
 
-	verbose(env, "fd %d is not pointing to valid bpf_map or btf\n", fd);
-	return PTR_ERR(map);
+    let map = __bpf_map_get(f);
+    if !is_err(map) {
+        __add_used_map(env, map).context("__add_used_map failed")?;
+        return Ok(0);
+    }
+
+    let btf = __btf_get_by_fd(f);
+    if !is_err(btf) {
+        btf_get(btf);
+        return __add_used_btf(env, btf).context("__add_used_btf failed");
+    }
+
+    verbose(env, format!("fd {fd} is not pointing to valid bpf_map or btf\n"));
+    Err(anyhow!("PTR_ERR(map): invalid map/btf fd"))
 }
 
+#[instrument(skip(env, patch))]
+pub fn add_hidden_subprog(env: &mut BpfVerifierEnv, patch: &[BpfInsn], len: i32) -> Result<i32> {
+    let cnt = env.subprog_cnt;
 
-// Extracted from /Users/nan/bs/aot/src/verifier.c
-static int add_hidden_subprog(struct bpf_verifier_env *env, struct bpf_insn *patch, int len)
-{
-	struct bpf_subprog_info *info = env->subprog_info;
-	int cnt = env->subprog_cnt;
-	struct bpf_prog *prog;
+    if env.hidden_subprog_cnt != 0 {
+        verifier_bug(env, "only one hidden subprog supported");
+        return Err(anyhow!("-EFAULT: only one hidden subprog supported"));
+    }
 
-	/* We only reserve one slot for hidden subprogs in subprog_info. */
-	if (env->hidden_subprog_cnt) {
-		verifier_bug(env, "only one hidden subprog supported");
-		return -EFAULT;
-	}
-	/* We're not patching any existing instruction, just appending the new
-	 * ones for the hidden subprog. Hence all of the adjustment operations
-	 * in bpf_patch_insn_data are no-ops.
-	 */
-	prog = bpf_patch_insn_data(env, env->prog->len - 1, patch, len);
-	if (!prog)
-		return -ENOMEM;
-	env->prog = prog;
-	info[cnt + 1].start = info[cnt].start;
-	info[cnt].start = prog->len - len + 1;
-	env->subprog_cnt++;
-	env->hidden_subprog_cnt++;
-	return 0;
+    let prog = bpf_patch_insn_data(env, env.prog.len - 1, patch, len)
+        .ok_or_else(|| anyhow!("-ENOMEM: bpf_patch_insn_data failed"))?;
+
+    env.prog = prog;
+
+    let info: &mut [BpfSubprogInfo] = env.subprog_info;
+    info[(cnt + 1) as usize].start = info[cnt as usize].start;
+    info[cnt as usize].start = env.prog.len - len + 1;
+    env.subprog_cnt += 1;
+    env.hidden_subprog_cnt += 1;
+    Ok(0)
 }
 
+#[instrument(skip(env))]
+pub fn add_kfunc_call(env: &mut BpfVerifierEnv, func_id: u32, offset: i16) -> Result<i32> {
+    let prog_aux: &mut BpfProgAux = env.prog.aux;
 
-// Extracted from /Users/nan/bs/aot/src/verifier.c
-static int add_kfunc_call(struct bpf_verifier_env *env, u32 func_id, s16 offset)
-{
-	struct bpf_kfunc_btf_tab *btf_tab;
-	struct btf_func_model func_model;
-	struct bpf_kfunc_desc_tab *tab;
-	struct bpf_prog_aux *prog_aux;
-	struct bpf_kfunc_meta kfunc;
-	struct bpf_kfunc_desc *desc;
-	unsigned long addr;
-	int err;
+    if prog_aux.kfunc_tab.is_none() {
+        if !btf_vmlinux() {
+            verbose(
+                env,
+                "calling kernel function is not supported without CONFIG_DEBUG_INFO_BTF\n",
+            );
+            return Err(anyhow!("-ENOTSUPP: CONFIG_DEBUG_INFO_BTF is required"));
+        }
 
-	prog_aux = env->prog->aux;
-	tab = prog_aux->kfunc_tab;
-	btf_tab = prog_aux->kfunc_btf_tab;
-	if (!tab) {
-		if (!btf_vmlinux) {
-			verbose(env, "calling kernel function is not supported without CONFIG_DEBUG_INFO_BTF\n");
-			return -ENOTSUPP;
-		}
+        if !env.prog.jit_requested {
+            verbose(env, "JIT is required for calling kernel function\n");
+            return Err(anyhow!("-ENOTSUPP: JIT is required"));
+        }
 
-		if (!env->prog->jit_requested) {
-			verbose(env, "JIT is required for calling kernel function\n");
-			return -ENOTSUPP;
-		}
+        if !bpf_jit_supports_kfunc_call() {
+            verbose(env, "JIT does not support calling kernel function\n");
+            return Err(anyhow!("-ENOTSUPP: JIT does not support kfunc call"));
+        }
 
-		if (!bpf_jit_supports_kfunc_call()) {
-			verbose(env, "JIT does not support calling kernel function\n");
-			return -ENOTSUPP;
-		}
+        if !env.prog.gpl_compatible {
+            verbose(
+                env,
+                "cannot call kernel function from non-GPL compatible program\n",
+            );
+            return Err(anyhow!("-EINVAL: non-GPL compatible program"));
+        }
 
-		if (!env->prog->gpl_compatible) {
-			verbose(env, "cannot call kernel function from non-GPL compatible program\n");
-			return -EINVAL;
-		}
+        prog_aux.kfunc_tab = Some(BpfKfuncDescTab::default());
+    }
 
-		tab = kzalloc_obj(*tab, GFP_KERNEL_ACCOUNT);
-		if (!tab)
-			return -ENOMEM;
-		prog_aux->kfunc_tab = tab;
-	}
+    if func_id == 0 && offset == 0 {
+        return Ok(0);
+    }
 
-	/* func_id == 0 is always invalid, but instead of returning an error, be
-	 * conservative and wait until the code elimination pass before returning
-	 * error, so that invalid calls that get pruned out can be in BPF programs
-	 * loaded from userspace.  It is also required that offset be untouched
-	 * for such calls.
-	 */
-	if (!func_id && !offset)
-		return 0;
+    if prog_aux.kfunc_btf_tab.is_none() && offset != 0 {
+        prog_aux.kfunc_btf_tab = Some(BpfKfuncBtfTab::default());
+    }
 
-	if (!btf_tab && offset) {
-		btf_tab = kzalloc_obj(*btf_tab, GFP_KERNEL_ACCOUNT);
-		if (!btf_tab)
-			return -ENOMEM;
-		prog_aux->kfunc_btf_tab = btf_tab;
-	}
+    if find_kfunc_desc(env.prog, func_id, offset).is_some() {
+        return Ok(0);
+    }
 
-	if (find_kfunc_desc(env->prog, func_id, offset))
-		return 0;
+    let tab = prog_aux
+        .kfunc_tab
+        .as_mut()
+        .ok_or_else(|| anyhow!("missing kfunc_tab"))?;
 
-	if (tab->nr_descs == MAX_KFUNC_DESCS) {
-		verbose(env, "too many different kernel function calls\n");
-		return -E2BIG;
-	}
+    if tab.nr_descs == MAX_KFUNC_DESCS {
+        verbose(env, "too many different kernel function calls\n");
+        return Err(anyhow!("-E2BIG: too many different kernel function calls"));
+    }
 
-	err = fetch_kfunc_meta(env, func_id, offset, &kfunc);
-	if (err)
-		return err;
+    let mut kfunc = BpfKfuncMeta::default();
+    fetch_kfunc_meta(env, func_id, offset, &mut kfunc).context("fetch_kfunc_meta failed")?;
 
-	addr = kallsyms_lookup_name(kfunc.name);
-	if (!addr) {
-		verbose(env, "cannot find address for kernel function %s\n", kfunc.name);
-		return -EINVAL;
-	}
+    let addr = kallsyms_lookup_name(kfunc.name);
+    if addr == 0 {
+        verbose(
+            env,
+            format!("cannot find address for kernel function {}\n", kfunc.name),
+        );
+        return Err(anyhow!("-EINVAL: kernel function address not found"));
+    }
 
-	if (bpf_dev_bound_kfunc_id(func_id)) {
-		err = bpf_dev_bound_kfunc_check(&env->log, prog_aux);
-		if (err)
-			return err;
-	}
+    if bpf_dev_bound_kfunc_id(func_id) {
+        bpf_dev_bound_kfunc_check(&env.log, prog_aux).context("bpf_dev_bound_kfunc_check failed")?;
+    }
 
-	err = btf_distill_func_proto(&env->log, kfunc.btf, kfunc.proto, kfunc.name, &func_model);
-	if (err)
-		return err;
+    let mut func_model = BtfFuncModel::default();
+    btf_distill_func_proto(&env.log, kfunc.btf, kfunc.proto, kfunc.name, &mut func_model)
+        .context("btf_distill_func_proto failed")?;
 
-	desc = &tab->descs[tab->nr_descs++];
-	desc->func_id = func_id;
-	desc->offset = offset;
-	desc->addr = addr;
-	desc->func_model = func_model;
-	sort(tab->descs, tab->nr_descs, sizeof(tab->descs[0]),
-	     kfunc_desc_cmp_by_id_off, NULL);
-	return 0;
+    let desc: &mut BpfKfuncDesc = &mut tab.descs[tab.nr_descs as usize];
+    tab.nr_descs += 1;
+    desc.func_id = func_id;
+    desc.offset = offset;
+    desc.addr = addr;
+    desc.func_model = func_model;
+
+    sort(
+        &mut tab.descs,
+        tab.nr_descs,
+        core::mem::size_of::<BpfKfuncDesc>(),
+        kfunc_desc_cmp_by_id_off,
+        None,
+    );
+    Ok(0)
 }
 
-
-// Extracted from /Users/nan/bs/aot/src/verifier.c
-static int add_kfunc_in_insns(struct bpf_verifier_env *env,
-			      struct bpf_insn *insn, int cnt)
-{
-	int i, ret;
-
-	for (i = 0; i < cnt; i++, insn++) {
-		if (bpf_pseudo_kfunc_call(insn)) {
-			ret = add_kfunc_call(env, insn->imm, insn->off);
-			if (ret < 0)
-				return ret;
-		}
-	}
-	return 0;
+#[instrument(skip(env, insns))]
+pub fn add_kfunc_in_insns(env: &mut BpfVerifierEnv, insns: &[BpfInsn], cnt: usize) -> Result<i32> {
+    for insn in insns.iter().take(cnt) {
+        if bpf_pseudo_kfunc_call(insn) {
+            add_kfunc_call(env, insn.imm as u32, insn.off)
+                .context("add_kfunc_call failed while scanning insns")?;
+        }
+    }
+    Ok(0)
 }
 
+#[instrument(skip(env, st, backedge))]
+pub fn add_scc_backedge(
+    env: &mut BpfVerifierEnv,
+    st: &BpfVerifierState,
+    backedge: &mut BpfSccBackedge,
+) -> Result<i32> {
+    let callchain: &mut BpfSccCallchain = &mut env.callchain_buf;
 
-// Extracted from /Users/nan/bs/aot/src/verifier.c
-static int add_scc_backedge(struct bpf_verifier_env *env,
-			    struct bpf_verifier_state *st,
-			    struct bpf_scc_backedge *backedge)
-{
-	struct bpf_scc_callchain *callchain = &env->callchain_buf;
-	struct bpf_scc_visit *visit;
+    if !compute_scc_callchain(env, st, callchain) {
+        verifier_bug(
+            env,
+            format!(
+                "add backedge: no SCC in verification path, insn_idx {}",
+                st.insn_idx
+            ),
+        );
+        return Err(anyhow!("-EFAULT: no SCC in verification path"));
+    }
 
-	if (!compute_scc_callchain(env, st, callchain)) {
-		verifier_bug(env, "add backedge: no SCC in verification path, insn_idx %d",
-			     st->insn_idx);
-		return -EFAULT;
-	}
-	visit = scc_visit_lookup(env, callchain);
-	if (!visit) {
-		verifier_bug(env, "add backedge: no visit info for call chain %s",
-			     format_callchain(env, callchain));
-		return -EFAULT;
-	}
-	if (env->log.level & BPF_LOG_LEVEL2)
-		verbose(env, "SCC backedge %s\n", format_callchain(env, callchain));
-	backedge->next = visit->backedges;
-	visit->backedges = backedge;
-	visit->num_backedges++;
-	env->num_backedges++;
-	update_peak_states(env);
-	return 0;
+    let visit: &mut BpfSccVisit = scc_visit_lookup(env, callchain)
+        .ok_or_else(|| anyhow!("-EFAULT: no visit info for call chain"))?;
+
+    if env.log.level & BPF_LOG_LEVEL2 != 0 {
+        verbose(env, format!("SCC backedge {}\n", format_callchain(env, callchain)));
+    }
+
+    backedge.next = visit.backedges;
+    visit.backedges = Some(backedge.clone());
+    visit.num_backedges += 1;
+    env.num_backedges += 1;
+    update_peak_states(env);
+    Ok(0)
 }
 
+#[instrument(skip(env))]
+pub fn add_subprog(env: &mut BpfVerifierEnv, off: i32) -> Result<i32> {
+    let insn_cnt = env.prog.len;
 
-// Extracted from /Users/nan/bs/aot/src/verifier.c
-static int add_subprog(struct bpf_verifier_env *env, int off)
-{
-	int insn_cnt = env->prog->len;
-	int ret;
+    if off >= insn_cnt || off < 0 {
+        verbose(env, "call to invalid destination\n");
+        return Err(anyhow!("-EINVAL: call to invalid destination"));
+    }
 
-	if (off >= insn_cnt || off < 0) {
-		verbose(env, "call to invalid destination\n");
-		return -EINVAL;
-	}
-	ret = find_subprog(env, off);
-	if (ret >= 0)
-		return ret;
-	if (env->subprog_cnt >= BPF_MAX_SUBPROGS) {
-		verbose(env, "too many subprograms\n");
-		return -E2BIG;
-	}
-	/* determine subprog starts. The end is one before the next starts */
-	env->subprog_info[env->subprog_cnt++].start = off;
-	sort(env->subprog_info, env->subprog_cnt,
-	     sizeof(env->subprog_info[0]), cmp_subprogs, NULL);
-	return env->subprog_cnt - 1;
+    let ret = find_subprog(env, off);
+    if ret >= 0 {
+        return Ok(ret);
+    }
+
+    if env.subprog_cnt >= BPF_MAX_SUBPROGS {
+        verbose(env, "too many subprograms\n");
+        return Err(anyhow!("-E2BIG: too many subprograms"));
+    }
+
+    env.subprog_info[env.subprog_cnt as usize].start = off;
+    env.subprog_cnt += 1;
+
+    sort(
+        &mut env.subprog_info,
+        env.subprog_cnt,
+        core::mem::size_of::<BpfSubprogInfo>(),
+        cmp_subprogs,
+        None,
+    );
+
+    Ok(env.subprog_cnt - 1)
 }
 
+#[instrument(skip(env))]
+pub fn add_subprog_and_kfunc(env: &mut BpfVerifierEnv) -> Result<i32> {
+    add_subprog(env, 0).context("failed to add entry subprog")?;
 
-// Extracted from /Users/nan/bs/aot/src/verifier.c
-static int add_subprog_and_kfunc(struct bpf_verifier_env *env)
-{
-	struct bpf_subprog_info *subprog = env->subprog_info;
-	int i, ret, insn_cnt = env->prog->len, ex_cb_insn;
-	struct bpf_insn *insn = env->prog->insnsi;
+    let insns = env.prog.insnsi.clone();
+    let insn_cnt = env.prog.len;
 
-	/* Add entry function. */
-	ret = add_subprog(env, 0);
-	if (ret)
-		return ret;
+    for (i, insn) in insns.iter().enumerate().take(insn_cnt as usize) {
+        if !bpf_pseudo_func(insn) && !bpf_pseudo_call(insn) && !bpf_pseudo_kfunc_call(insn) {
+            continue;
+        }
 
-	for (i = 0; i < insn_cnt; i++, insn++) {
-		if (!bpf_pseudo_func(insn) && !bpf_pseudo_call(insn) &&
-		    !bpf_pseudo_kfunc_call(insn))
-			continue;
+        if !env.bpf_capable {
+            verbose(
+                env,
+                "loading/calling other bpf or kernel functions are allowed for CAP_BPF and CAP_SYS_ADMIN\n",
+            );
+            return Err(anyhow!("-EPERM: requires CAP_BPF and CAP_SYS_ADMIN"));
+        }
 
-		if (!env->bpf_capable) {
-			verbose(env, "loading/calling other bpf or kernel functions are allowed for CAP_BPF and CAP_SYS_ADMIN\n");
-			return -EPERM;
-		}
+        if bpf_pseudo_func(insn) || bpf_pseudo_call(insn) {
+            add_subprog(env, i as i32 + insn.imm + 1)?;
+        } else {
+            add_kfunc_call(env, insn.imm as u32, insn.off)?;
+        }
+    }
 
-		if (bpf_pseudo_func(insn) || bpf_pseudo_call(insn))
-			ret = add_subprog(env, i + insn->imm + 1);
-		else
-			ret = add_kfunc_call(env, insn->imm, insn->off);
+    let ex_cb_insn = bpf_find_exception_callback_insn_off(env)
+        .context("bpf_find_exception_callback_insn_off failed")?;
 
-		if (ret < 0)
-			return ret;
-	}
+    if ex_cb_insn != 0 {
+        add_subprog(env, ex_cb_insn)?;
+        for i in 1..env.subprog_cnt as usize {
+            if env.subprog_info[i].start != ex_cb_insn {
+                continue;
+            }
+            env.exception_callback_subprog = i as i32;
+            mark_subprog_exc_cb(env, i as i32);
+            break;
+        }
+    }
 
-	ret = bpf_find_exception_callback_insn_off(env);
-	if (ret < 0)
-		return ret;
-	ex_cb_insn = ret;
+    env.subprog_info[env.subprog_cnt as usize].start = insn_cnt;
 
-	/* If ex_cb_insn > 0, this means that the main program has a subprog
-	 * marked using BTF decl tag to serve as the exception callback.
-	 */
-	if (ex_cb_insn) {
-		ret = add_subprog(env, ex_cb_insn);
-		if (ret < 0)
-			return ret;
-		for (i = 1; i < env->subprog_cnt; i++) {
-			if (env->subprog_info[i].start != ex_cb_insn)
-				continue;
-			env->exception_callback_subprog = i;
-			mark_subprog_exc_cb(env, i);
-			break;
-		}
-	}
+    if env.log.level & BPF_LOG_LEVEL2 != 0 {
+        for i in 0..env.subprog_cnt as usize {
+            verbose(env, format!("func#{} @{}\n", i, env.subprog_info[i].start));
+        }
+    }
 
-	/* Add a fake 'exit' subprog which could simplify subprog iteration
-	 * logic. 'subprog_cnt' should not be increased.
-	 */
-	subprog[env->subprog_cnt].start = insn_cnt;
-
-	if (env->log.level & BPF_LOG_LEVEL2)
-		for (i = 0; i < env->subprog_cnt; i++)
-			verbose(env, "func#%d @%d\n", i, subprog[i].start);
-
-	return 0;
+    Ok(0)
 }
 
+#[instrument(skip(env))]
+pub fn add_used_map(env: &mut BpfVerifierEnv, fd: i32) -> Result<i32> {
+    let f = fd;
+    let map = __bpf_map_get(f);
 
-// Extracted from /Users/nan/bs/aot/src/verifier.c
-static int add_used_map(struct bpf_verifier_env *env, int fd)
-{
-	struct bpf_map *map;
-	CLASS(fd, f)(fd);
+    if is_err(map) {
+        verbose(env, format!("fd {fd} is not pointing to valid bpf_map\n"));
+        return Err(anyhow!("PTR_ERR(map): invalid bpf_map fd"));
+    }
 
-	map = __bpf_map_get(f);
-	if (IS_ERR(map)) {
-		verbose(env, "fd %d is not pointing to valid bpf_map\n", fd);
-		return PTR_ERR(map);
-	}
-
-	return __add_used_map(env, map);
+    __add_used_map(env, map).context("__add_used_map failed")
 }
-
-
