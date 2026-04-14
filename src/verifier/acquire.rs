@@ -1,68 +1,64 @@
-// Extracted from /Users/nan/bs/aot/src/verifier.c
-static int acquire_irq_state(struct bpf_verifier_env *env, int insn_idx)
-{
-	struct bpf_verifier_state *state = env->cur_state;
-	struct bpf_reference_state *s;
+//! Missing types: BpfVerifierEnv, BpfVerifierState, BpfReferenceState, RefStateType
 
-	s = acquire_reference_state(env, insn_idx);
-	if (!s)
-		return -ENOMEM;
-	s->type = REF_TYPE_IRQ;
-	s->id = ++env->id_gen;
+use anyhow::{anyhow, Result};
+use tracing::instrument;
 
-	state->active_irq_id = s->id;
-	return s->id;
+#[instrument(skip(env))]
+pub fn acquire_irq_state(env: &mut BpfVerifierEnv, insn_idx: i32) -> Result<i32> {
+    let s = acquire_reference_state(env, insn_idx)
+        .ok_or_else(|| anyhow!("-ENOMEM: failed to acquire reference state for irq"))?;
+    s.r#type = RefStateType::RefTypeIrq;
+    env.id_gen += 1;
+    s.id = env.id_gen;
+
+    let state: &mut BpfVerifierState = env.cur_state;
+    state.active_irq_id = s.id;
+    Ok(s.id)
 }
 
+#[instrument(skip(env, ptr))]
+pub fn acquire_lock_state(
+    env: &mut BpfVerifierEnv,
+    insn_idx: i32,
+    r#type: RefStateType,
+    id: i32,
+    ptr: *mut core::ffi::c_void,
+) -> Result<()> {
+    let s = acquire_reference_state(env, insn_idx)
+        .ok_or_else(|| anyhow!("-ENOMEM: failed to acquire reference state for lock"))?;
+    s.r#type = r#type;
+    s.id = id;
+    s.ptr = ptr;
 
-// Extracted from /Users/nan/bs/aot/src/verifier.c
-static int acquire_lock_state(struct bpf_verifier_env *env, int insn_idx, enum ref_state_type type,
-			      int id, void *ptr)
-{
-	struct bpf_verifier_state *state = env->cur_state;
-	struct bpf_reference_state *s;
-
-	s = acquire_reference_state(env, insn_idx);
-	if (!s)
-		return -ENOMEM;
-	s->type = type;
-	s->id = id;
-	s->ptr = ptr;
-
-	state->active_locks++;
-	state->active_lock_id = id;
-	state->active_lock_ptr = ptr;
-	return 0;
+    let state: &mut BpfVerifierState = env.cur_state;
+    state.active_locks += 1;
+    state.active_lock_id = id;
+    state.active_lock_ptr = ptr;
+    Ok(())
 }
 
-
-// Extracted from /Users/nan/bs/aot/src/verifier.c
-static int acquire_reference(struct bpf_verifier_env *env, int insn_idx)
-{
-	struct bpf_reference_state *s;
-
-	s = acquire_reference_state(env, insn_idx);
-	if (!s)
-		return -ENOMEM;
-	s->type = REF_TYPE_PTR;
-	s->id = ++env->id_gen;
-	return s->id;
+#[instrument(skip(env))]
+pub fn acquire_reference(env: &mut BpfVerifierEnv, insn_idx: i32) -> Result<i32> {
+    let s = acquire_reference_state(env, insn_idx)
+        .ok_or_else(|| anyhow!("-ENOMEM: failed to acquire reference state"))?;
+    s.r#type = RefStateType::RefTypePtr;
+    env.id_gen += 1;
+    s.id = env.id_gen;
+    Ok(s.id)
 }
 
+#[instrument(skip(env))]
+pub fn acquire_reference_state(
+    env: &mut BpfVerifierEnv,
+    insn_idx: i32,
+) -> Option<&mut BpfReferenceState> {
+    let state: &mut BpfVerifierState = env.cur_state;
+    let new_ofs = state.acquired_refs;
 
-// Extracted from /Users/nan/bs/aot/src/verifier.c
-static struct bpf_reference_state *acquire_reference_state(struct bpf_verifier_env *env, int insn_idx)
-{
-	struct bpf_verifier_state *state = env->cur_state;
-	int new_ofs = state->acquired_refs;
-	int err;
+    if resize_reference_state(state, state.acquired_refs + 1).is_err() {
+        return None;
+    }
 
-	err = resize_reference_state(state, state->acquired_refs + 1);
-	if (err)
-		return NULL;
-	state->refs[new_ofs].insn_idx = insn_idx;
-
-	return &state->refs[new_ofs];
+    state.refs[new_ofs].insn_idx = insn_idx;
+    Some(&mut state.refs[new_ofs])
 }
-
-
