@@ -1,18 +1,16 @@
+//! Missing types: BpfInsn, BtfType, Btf
+
+use anyhow::Result;
+use tracing::instrument;
+
 // Extracted from /Users/nan/bs/aot/src/verifier.c
-static const char *disasm_kfunc_name(void *data, const struct bpf_insn *insn)
-{
-	const struct btf_type *func;
-	struct btf *desc_btf;
+#[instrument(skip(data, insn))]
+pub fn disasm_kfunc_name(data: *mut core::ffi::c_void, insn: &BpfInsn) -> Result<Option<&'static str>> {
+    if insn.src_reg != BPF_PSEUDO_KFUNC_CALL {
+        return Ok(None);
+    }
 
-	if (insn->src_reg != BPF_PSEUDO_KFUNC_CALL)
-		return NULL;
-
-	desc_btf = find_kfunc_desc_btf(data, insn->off);
-	if (IS_ERR(desc_btf))
-		return "<error>";
-
-	func = btf_type_by_id(desc_btf, insn->imm);
-	return btf_name_by_offset(desc_btf, func->name_off);
+    let desc_btf: &Btf = find_kfunc_desc_btf(data, insn.off)?;
+    let func: &BtfType = btf_type_by_id(desc_btf, insn.imm as u32);
+    Ok(Some(btf_name_by_offset(desc_btf, func.name_off)))
 }
-
-
