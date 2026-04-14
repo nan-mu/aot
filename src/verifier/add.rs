@@ -1,4 +1,5 @@
 //! Missing types: BpfVerifierEnv, BpfMap, Btf, BpfSubprogInfo, BpfProg, BpfInsn, BpfKfuncBtfTab, BtfFuncModel, BpfKfuncDescTab, BpfProgAux, BpfKfuncMeta, BpfKfuncDesc, BpfSccBackedge, BpfVerifierState, BpfSccCallchain, BpfSccVisit, BtfModPair
+//! All manually inspected and passed
 
 use anyhow::{anyhow, Context, Result};
 use tracing::instrument;
