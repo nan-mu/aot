@@ -50,7 +50,7 @@ pub fn acquire_reference(env: &mut BpfVerifierEnv, insn_idx: i32) -> Result<i32>
     Ok(s.id)
 }
 
-// 最好不要用Option，
+// 最好不要用Option，resize_reference_state可能会返回有意义的Err，直接向上传递就好
 #[instrument(skip(env))]
 pub fn acquire_reference_state(
     env: &mut BpfVerifierEnv,
