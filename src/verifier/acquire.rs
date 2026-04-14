@@ -1,13 +1,12 @@
 //! Missing types: BpfVerifierEnv, BpfVerifierState, BpfReferenceState, RefStateType
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use tracing::instrument;
 
 /// Manual inspection passed
 #[instrument(skip(env))]
 pub fn acquire_irq_state(env: &mut BpfVerifierEnv, insn_idx: i32) -> Result<i32> {
-    let s = acquire_reference_state(env, insn_idx)
-        .ok_or_else(|| anyhow!("-ENOMEM: failed to acquire reference state for irq"))?;
+    let s = acquire_reference_state(env, insn_idx).context("acquire_irq_state failed")?;
     s.r#type = RefStateType::RefTypeIrq;
     env.id_gen += 1;
     s.id = env.id_gen;
@@ -26,8 +25,7 @@ pub fn acquire_lock_state(
     id: i32,
     ptr: *mut core::ffi::c_void,
 ) -> Result<()> {
-    let s = acquire_reference_state(env, insn_idx)
-        .ok_or_else(|| anyhow!("-ENOMEM: failed to acquire reference state for lock"))?;
+    let s = acquire_reference_state(env, insn_idx).context("acquire_lock_state failed")?;
     s.r#type = r#type;
     s.id = id;
     s.ptr = ptr;
@@ -42,8 +40,7 @@ pub fn acquire_lock_state(
 /// Manual inspection passed
 #[instrument(skip(env))]
 pub fn acquire_reference(env: &mut BpfVerifierEnv, insn_idx: i32) -> Result<i32> {
-    let s = acquire_reference_state(env, insn_idx)
-        .ok_or_else(|| anyhow!("-ENOMEM: failed to acquire reference state"))?;
+    let s = acquire_reference_state(env, insn_idx).context("acquire_reference failed")?;
     s.r#type = RefStateType::RefTypePtr;
     env.id_gen += 1;
     s.id = env.id_gen;
@@ -55,14 +52,13 @@ pub fn acquire_reference(env: &mut BpfVerifierEnv, insn_idx: i32) -> Result<i32>
 pub fn acquire_reference_state(
     env: &mut BpfVerifierEnv,
     insn_idx: i32,
-) -> Option<&mut BpfReferenceState> {
+) -> Result<&mut BpfReferenceState> {
     let state: &mut BpfVerifierState = env.cur_state;
     let new_ofs = state.acquired_refs;
 
-    if resize_reference_state(state, state.acquired_refs + 1).is_err() {
-        return None;
-    }
+    resize_reference_state(state, state.acquired_refs + 1)
+        .map_err(|_| anyhow!("acquire_reference_state failed"))?;
 
     state.refs[new_ofs].insn_idx = insn_idx;
-    Some(&mut state.refs[new_ofs])
+    Ok(&mut state.refs[new_ofs])
 }
