@@ -1,18 +1,20 @@
-// Extracted from /Users/nan/bs/aot/src/verifier.c
-static struct bpf_retval_range retval_range(s32 minval, s32 maxval)
-{
-	return (struct bpf_retval_range){ minval, maxval };
-}
+//! Missing types: BpfRetvalRange, BpfRegState
 
+use anyhow::Result;
+use tracing::instrument;
 
 // Extracted from /Users/nan/bs/aot/src/verifier.c
-static bool retval_range_within(struct bpf_retval_range range, const struct bpf_reg_state *reg,
-				bool return_32bit)
-{
-	if (return_32bit)
-		return range.minval <= reg->s32_min_value && reg->s32_max_value <= range.maxval;
-	else
-		return range.minval <= reg->smin_value && reg->smax_value <= range.maxval;
+#[instrument]
+pub fn retval_range(minval: i32, maxval: i32) -> Result<BpfRetvalRange> {
+    Ok(BpfRetvalRange { minval, maxval })
 }
 
-
+// Extracted from /Users/nan/bs/aot/src/verifier.c
+#[instrument(skip(reg))]
+pub fn retval_range_within(range: BpfRetvalRange, reg: &BpfRegState, return_32bit: bool) -> Result<bool> {
+    Ok(if return_32bit {
+        range.minval <= reg.s32_min_value && reg.s32_max_value <= range.maxval
+    } else {
+        range.minval as i64 <= reg.smin_value && reg.smax_value <= range.maxval as i64
+    })
+}
