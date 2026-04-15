@@ -1,89 +1,82 @@
-// Extracted from /Users/nan/bs/aot/src/verifier.c
-static int propagate_backedges(struct bpf_verifier_env *env, struct bpf_scc_visit *visit)
-{
-	struct bpf_scc_backedge *backedge;
-	struct bpf_verifier_state *st;
-	bool changed;
-	int i, err;
+//! Missing types: BpfVerifierEnv, BpfSccVisit, BpfSccBackedge, BpfVerifierState
 
-	i = 0;
-	do {
-		if (i++ > MAX_BACKEDGE_ITERS) {
-			if (env->log.level & BPF_LOG_LEVEL2)
-				verbose(env, "%s: too many iterations\n", __func__);
-			for (backedge = visit->backedges; backedge; backedge = backedge->next)
-				mark_all_scalars_precise(env, &backedge->state);
-			break;
-		}
-		changed = false;
-		for (backedge = visit->backedges; backedge; backedge = backedge->next) {
-			st = &backedge->state;
-			err = propagate_precision(env, st->equal_state, st, &changed);
-			if (err)
-				return err;
-		}
-	} while (changed);
-
-	free_backedges(visit);
-	return 0;
-}
-
+use anyhow::Result;
+use tracing::instrument;
 
 // Extracted from /Users/nan/bs/aot/src/verifier.c
-static int propagate_precision(struct bpf_verifier_env *env,
-			       const struct bpf_verifier_state *old,
-			       struct bpf_verifier_state *cur,
-			       bool *changed)
-{
-	struct bpf_reg_state *state_reg;
-	struct bpf_func_state *state;
-	int i, err = 0, fr;
-	bool first;
+#[instrument(skip(env, visit))]
+pub fn propagate_backedges(env: &mut BpfVerifierEnv, visit: &mut BpfSccVisit) -> Result<i32> {
+    let mut i = 0;
 
-	for (fr = old->curframe; fr >= 0; fr--) {
-		state = old->frame[fr];
-		state_reg = state->regs;
-		first = true;
-		for (i = 0; i < BPF_REG_FP; i++, state_reg++) {
-			if (state_reg->type != SCALAR_VALUE ||
-			    !state_reg->precise)
-				continue;
-			if (env->log.level & BPF_LOG_LEVEL2) {
-				if (first)
-					verbose(env, "frame %d: propagating r%d", fr, i);
-				else
-					verbose(env, ",r%d", i);
-			}
-			bt_set_frame_reg(&env->bt, fr, i);
-			first = false;
-		}
+    loop {
+        i += 1;
+        if i > MAX_BACKEDGE_ITERS {
+            if (env.log.level & BPF_LOG_LEVEL2) != 0 {
+                verbose(env, format!("{}: too many iterations\n", "propagate_backedges"));
+            }
+            let mut b = visit.backedges.as_mut();
+            while let Some(be) = b {
+                mark_all_scalars_precise(env, &mut be.state)?;
+                b = be.next.as_mut();
+            }
+            break;
+        }
 
-		for (i = 0; i < state->allocated_stack / BPF_REG_SIZE; i++) {
-			if (!is_spilled_reg(&state->stack[i]))
-				continue;
-			state_reg = &state->stack[i].spilled_ptr;
-			if (state_reg->type != SCALAR_VALUE ||
-			    !state_reg->precise)
-				continue;
-			if (env->log.level & BPF_LOG_LEVEL2) {
-				if (first)
-					verbose(env, "frame %d: propagating fp%d",
-						fr, (-i - 1) * BPF_REG_SIZE);
-				else
-					verbose(env, ",fp%d", (-i - 1) * BPF_REG_SIZE);
-			}
-			bt_set_frame_slot(&env->bt, fr, i);
-			first = false;
-		}
-		if (!first && (env->log.level & BPF_LOG_LEVEL2))
-			verbose(env, "\n");
-	}
+        let mut changed = false;
+        let mut b = visit.backedges.as_mut();
+        while let Some(be) = b {
+            let st: &mut BpfVerifierState = &mut be.state;
+            propagate_precision(env, be.state.equal_state, st, &mut changed)?;
+            b = be.next.as_mut();
+        }
 
-	err = inner_mark_chain_precision(env, cur, -1, changed);
-	if (err < 0)
-		return err;
+        if !changed {
+            break;
+        }
+    }
 
-	return 0;
+    free_backedges(visit)?;
+    Ok(0)
 }
 
+// Extracted from /Users/nan/bs/aot/src/verifier.c
+#[instrument(skip(env, old, cur, changed))]
+pub fn propagate_precision(
+    env: &mut BpfVerifierEnv,
+    old: &BpfVerifierState,
+    cur: &mut BpfVerifierState,
+    changed: &mut bool,
+) -> Result<i32> {
+    for fr in (0..=old.curframe as usize).rev() {
+        let state = &old.frame[fr];
+        let mut first = true;
 
+        for i in 0..BPF_REG_FP as usize {
+            let state_reg = &state.regs[i];
+            if state_reg.r#type != SCALAR_VALUE || !state_reg.precise {
+                continue;
+            }
+            bt_set_frame_reg(&mut env.bt, fr as i32, i as i32);
+            first = false;
+        }
+
+        for i in 0..(state.allocated_stack / BPF_REG_SIZE as i32) as usize {
+            if !is_spilled_reg(&state.stack[i]) {
+                continue;
+            }
+            let state_reg = &state.stack[i].spilled_ptr;
+            if state_reg.r#type != SCALAR_VALUE || !state_reg.precise {
+                continue;
+            }
+            bt_set_frame_slot(&mut env.bt, fr as i32, i as u32);
+            first = false;
+        }
+
+        if !first && (env.log.level & BPF_LOG_LEVEL2) != 0 {
+            verbose(env, "\n");
+        }
+    }
+
+    inner_mark_chain_precision(env, cur, -1, Some(changed))?;
+    Ok(0)
+}
