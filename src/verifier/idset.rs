@@ -1,33 +1,36 @@
-// Extracted from /Users/nan/bs/aot/src/verifier.c
-static u32 idset_cnt_get(struct bpf_idset *idset, u32 id)
-{
-	u32 i;
+//! Missing types: BpfIdset
 
-	for (i = 0; i < idset->num_ids; i++) {
-		if (idset->entries[i].id == id)
-			return idset->entries[i].cnt;
-	}
-	return 0;
-}
-
+use anyhow::Result;
+use tracing::instrument;
 
 // Extracted from /Users/nan/bs/aot/src/verifier.c
-static void idset_cnt_inc(struct bpf_idset *idset, u32 id)
-{
-	u32 i;
-
-	for (i = 0; i < idset->num_ids; i++) {
-		if (idset->entries[i].id == id) {
-			idset->entries[i].cnt++;
-			return;
-		}
-	}
-	/* New id */
-	if (idset->num_ids < BPF_ID_MAP_SIZE) {
-		idset->entries[idset->num_ids].id = id;
-		idset->entries[idset->num_ids].cnt = 1;
-		idset->num_ids++;
-	}
+#[instrument(skip(idset))]
+pub fn idset_cnt_get(idset: &BpfIdset, id: u32) -> Result<u32> {
+    for i in 0..idset.num_ids as usize {
+        if idset.entries[i].id == id {
+            return Ok(idset.entries[i].cnt);
+        }
+    }
+    Ok(0)
 }
 
+// Extracted from /Users/nan/bs/aot/src/verifier.c
+#[instrument(skip(idset))]
+pub fn idset_cnt_inc(idset: &mut BpfIdset, id: u32) -> Result<()> {
+    for i in 0..idset.num_ids as usize {
+        if idset.entries[i].id == id {
+            idset.entries[i].cnt += 1;
+            return Ok(());
+        }
+    }
 
+    /* New id */
+    if idset.num_ids < BPF_ID_MAP_SIZE as u32 {
+        let n = idset.num_ids as usize;
+        idset.entries[n].id = id;
+        idset.entries[n].cnt = 1;
+        idset.num_ids += 1;
+    }
+
+    Ok(())
+}
