@@ -1,8 +1,11 @@
+use anyhow::Result;
+use tracing::instrument;
+
 // Extracted from /Users/nan/bs/aot/src/verifier.c
-static void scrub_spilled_slot(u8 *stype)
-{
-	if (*stype != STACK_INVALID)
-		*stype = STACK_MISC;
+#[instrument]
+pub fn scrub_spilled_slot(stype: &mut u8) -> Result<()> {
+    if *stype != STACK_INVALID {
+        *stype = STACK_MISC;
+    }
+    Ok(())
 }
-
-
