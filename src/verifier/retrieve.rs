@@ -1,33 +1,33 @@
+//! Missing types: BpfRegState
+
+use anyhow::{anyhow, Result};
+use tracing::instrument;
+
 // Extracted from /Users/nan/bs/aot/src/verifier.c
-static int retrieve_ptr_limit(const struct bpf_reg_state *ptr_reg,
-			      u32 *alu_limit, bool mask_to_left)
-{
-	u32 max = 0, ptr_limit = 0;
+#[instrument(skip(ptr_reg, alu_limit))]
+pub fn retrieve_ptr_limit(ptr_reg: &BpfRegState, alu_limit: &mut u32, mask_to_left: bool) -> Result<i32> {
+    let (max, ptr_limit): (u32, i64) = match ptr_reg.r#type {
+        PTR_TO_STACK => {
+            let max = MAX_BPF_STACK as u32 + if mask_to_left { 1 } else { 0 };
+            let ptr_limit = -((ptr_reg.var_off.value as i64) + (ptr_reg.off as i64));
+            (max, ptr_limit)
+        }
+        PTR_TO_MAP_VALUE => {
+            let max = ptr_reg.map_ptr.value_size;
+            let lim = if mask_to_left {
+                ptr_reg.smin_value
+            } else {
+                ptr_reg.umax_value as i64
+            } + ptr_reg.off as i64;
+            (max, lim)
+        }
+        _ => return Ok(REASON_TYPE),
+    };
 
-	switch (ptr_reg->type) {
-	case PTR_TO_STACK:
-		/* Offset 0 is out-of-bounds, but acceptable start for the
-		 * left direction, see BPF_REG_FP. Also, unknown scalar
-		 * offset where we would need to deal with min/max bounds is
-		 * currently prohibited for unprivileged.
-		 */
-		max = MAX_BPF_STACK + mask_to_left;
-		ptr_limit = -(ptr_reg->var_off.value + ptr_reg->off);
-		break;
-	case PTR_TO_MAP_VALUE:
-		max = ptr_reg->map_ptr->value_size;
-		ptr_limit = (mask_to_left ?
-			     ptr_reg->smin_value :
-			     ptr_reg->umax_value) + ptr_reg->off;
-		break;
-	default:
-		return REASON_TYPE;
-	}
+    if ptr_limit < 0 || (ptr_limit as u32) >= max {
+        return Ok(REASON_LIMIT);
+    }
 
-	if (ptr_limit >= max)
-		return REASON_LIMIT;
-	*alu_limit = ptr_limit;
-	return 0;
+    *alu_limit = ptr_limit as u32;
+    Ok(0)
 }
-
-
