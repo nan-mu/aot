@@ -1,10 +1,13 @@
+//! Missing types: BtfField
+
+use anyhow::Result;
+use tracing::instrument;
+
 // Extracted from /Users/nan/bs/aot/src/verifier.c
-static bool rcu_safe_kptr(const struct btf_field *field)
-{
-	const struct btf_field_kptr *kptr = &field->kptr;
+#[instrument(skip(field))]
+pub fn rcu_safe_kptr(field: &BtfField) -> Result<bool> {
+    let kptr = &field.kptr;
 
-	return field->type == BPF_KPTR_PERCPU ||
-	       (field->type == BPF_KPTR_REF && rcu_protected_object(kptr->btf, kptr->btf_id));
+    Ok(field.r#type == BPF_KPTR_PERCPU
+        || (field.r#type == BPF_KPTR_REF && rcu_protected_object(kptr.btf, kptr.btf_id)))
 }
-
-
