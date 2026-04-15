@@ -1,21 +1,24 @@
+//! Missing types: Bitmap64
+
+use anyhow::Result;
+use tracing::instrument;
+
 // Extracted from /Users/nan/bs/aot/src/verifier.c
-static void fmt_reg_mask(char *buf, ssize_t buf_sz, u32 reg_mask)
-{
-	DECLARE_BITMAP(mask, 64);
-	bool first = true;
-	int i, n;
+#[instrument(skip(buf))]
+pub fn fmt_reg_mask(buf: &mut String, reg_mask: u32) -> Result<()> {
+    let mut first = true;
+    buf.clear();
 
-	buf[0] = '\0';
+    for i in 0..32u32 {
+        if (reg_mask & (1u32 << i)) == 0 {
+            continue;
+        }
+        if !first {
+            buf.push(',');
+        }
+        first = false;
+        buf.push_str(&format!("r{}", i));
+    }
 
-	bitmap_from_u64(mask, reg_mask);
-	for_each_set_bit(i, mask, 32) {
-		n = snprintf(buf, buf_sz, "%sr%d", first ? "" : ",", i);
-		first = false;
-		buf += n;
-		buf_sz -= n;
-		if (buf_sz < 0)
-			break;
-	}
+    Ok(())
 }
-
-
