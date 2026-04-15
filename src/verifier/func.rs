@@ -1,33 +1,41 @@
-// Extracted from /Users/nan/bs/aot/src/verifier.c
-static struct bpf_func_state *func(struct bpf_verifier_env *env,
-				   const struct bpf_reg_state *reg)
-{
-	struct bpf_verifier_state *cur = env->cur_state;
+//! Missing types: BpfVerifierEnv, BpfRegState, BpfVerifierState, BpfFuncState, ExactLevel
 
-	return cur->frame[reg->frameno];
-}
-
+use anyhow::Result;
+use tracing::instrument;
 
 // Extracted from /Users/nan/bs/aot/src/verifier.c
-static bool func_states_equal(struct bpf_verifier_env *env, struct bpf_func_state *old,
-			      struct bpf_func_state *cur, u32 insn_idx, enum exact_level exact)
-{
-	u16 live_regs = env->insn_aux_data[insn_idx].live_regs_before;
-	u16 i;
-
-	if (old->callback_depth > cur->callback_depth)
-		return false;
-
-	for (i = 0; i < MAX_BPF_REG; i++)
-		if (((1 << i) & live_regs) &&
-		    !regsafe(env, &old->regs[i], &cur->regs[i],
-			     &env->idmap_scratch, exact))
-			return false;
-
-	if (!stacksafe(env, old, cur, &env->idmap_scratch, exact))
-		return false;
-
-	return true;
+#[instrument(skip(env, reg))]
+pub fn func(env: &mut BpfVerifierEnv, reg: &BpfRegState) -> Result<&mut BpfFuncState> {
+    let cur: &mut BpfVerifierState = env.cur_state;
+    Ok(cur.frame[reg.frameno as usize])
 }
 
+// Extracted from /Users/nan/bs/aot/src/verifier.c
+#[instrument(skip(env, old, cur))]
+pub fn func_states_equal(
+    env: &mut BpfVerifierEnv,
+    old: &mut BpfFuncState,
+    cur: &mut BpfFuncState,
+    insn_idx: u32,
+    exact: ExactLevel,
+) -> Result<bool> {
+    let live_regs = env.insn_aux_data[insn_idx as usize].live_regs_before;
 
+    if old.callback_depth > cur.callback_depth {
+        return Ok(false);
+    }
+
+    for i in 0..MAX_BPF_REG as usize {
+        if ((1u16 << i) & live_regs) != 0
+            && !regsafe(env, &old.regs[i], &cur.regs[i], &mut env.idmap_scratch, exact)
+        {
+            return Ok(false);
+        }
+    }
+
+    if !stacksafe(env, old, cur, &mut env.idmap_scratch, exact) {
+        return Ok(false);
+    }
+
+    Ok(true)
+}
