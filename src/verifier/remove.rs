@@ -1,33 +1,33 @@
+//! Missing types: BpfVerifierEnv, BpfSubprogInfo, BpfInsnAuxData, BpfInsn
+
+use anyhow::Result;
+use tracing::instrument;
+
 // Extracted from /Users/nan/bs/aot/src/verifier.c
-static int remove_fastcall_spills_fills(struct bpf_verifier_env *env)
-{
-	struct bpf_subprog_info *subprog = env->subprog_info;
-	struct bpf_insn_aux_data *aux = env->insn_aux_data;
-	struct bpf_insn *insn = env->prog->insnsi;
-	int insn_cnt = env->prog->len;
-	u32 spills_num;
-	bool modified = false;
-	int i, j;
+#[instrument(skip(env))]
+pub fn remove_fastcall_spills_fills(env: &mut BpfVerifierEnv) -> Result<i32> {
+    let mut subprog_idx = 0usize;
+    let mut modified = false;
+    let insn_cnt = env.prog.len as usize;
 
-	for (i = 0; i < insn_cnt; i++, insn++) {
-		if (aux[i].fastcall_spills_num > 0) {
-			spills_num = aux[i].fastcall_spills_num;
-			/* NOPs would be removed by opt_remove_nops() */
-			for (j = 1; j <= spills_num; ++j) {
-				*(insn - j) = NOP;
-				*(insn + j) = NOP;
-			}
-			modified = true;
-		}
-		if ((subprog + 1)->start == i + 1) {
-			if (modified && !subprog->keep_fastcall_stack)
-				subprog->stack_depth = -subprog->fastcall_stack_off;
-			subprog++;
-			modified = false;
-		}
-	}
+    for i in 0..insn_cnt {
+        let spills_num = env.insn_aux_data[i].fastcall_spills_num;
+        if spills_num > 0 {
+            for j in 1..=spills_num as usize {
+                env.prog.insnsi[i - j] = NOP;
+                env.prog.insnsi[i + j] = NOP;
+            }
+            modified = true;
+        }
 
-	return 0;
+        if env.subprog_info[subprog_idx + 1].start as usize == i + 1 {
+            if modified && !env.subprog_info[subprog_idx].keep_fastcall_stack {
+                env.subprog_info[subprog_idx].stack_depth = -env.subprog_info[subprog_idx].fastcall_stack_off;
+            }
+            subprog_idx += 1;
+            modified = false;
+        }
+    }
+
+    Ok(0)
 }
-
-
