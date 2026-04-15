@@ -1,10 +1,13 @@
+//! Missing types: BpfVerifierEnv, ListHead, BpfVerifierState, BpfFuncState
+
+use anyhow::Result;
+use tracing::instrument;
+
 // Extracted from /Users/nan/bs/aot/src/verifier.c
-static struct list_head *explored_state(struct bpf_verifier_env *env, int idx)
-{
-	struct bpf_verifier_state *cur = env->cur_state;
-	struct bpf_func_state *state = cur->frame[cur->curframe];
-
-	return &env->explored_states[(idx ^ state->callsite) % state_htab_size(env)];
+#[instrument(skip(env))]
+pub fn explored_state(env: &mut BpfVerifierEnv, idx: i32) -> Result<&mut ListHead> {
+    let cur: &mut BpfVerifierState = env.cur_state;
+    let state: &mut BpfFuncState = cur.frame[cur.curframe as usize];
+    let bucket = ((idx as u32 ^ state.callsite as u32) % state_htab_size(env) as u32) as usize;
+    Ok(&mut env.explored_states[bucket])
 }
-
-
