@@ -1,42 +1,41 @@
-// Extracted from /Users/nan/bs/aot/src/verifier.c
-static bool iter_active_depths_differ(struct bpf_verifier_state *old, struct bpf_verifier_state *cur)
-{
-	struct bpf_reg_state *slot, *cur_slot;
-	struct bpf_func_state *state;
-	int i, fr;
+//! Missing types: BpfVerifierState, BpfRegState, BpfFuncState, BpfVerifierEnv
 
-	for (fr = old->curframe; fr >= 0; fr--) {
-		state = old->frame[fr];
-		for (i = 0; i < state->allocated_stack / BPF_REG_SIZE; i++) {
-			if (state->stack[i].slot_type[0] != STACK_ITER)
-				continue;
-
-			slot = &state->stack[i].spilled_ptr;
-			if (slot->iter.state != BPF_ITER_STATE_ACTIVE)
-				continue;
-
-			cur_slot = &cur->frame[fr]->stack[i].spilled_ptr;
-			if (cur_slot->iter.depth != slot->iter.depth)
-				return true;
-		}
-	}
-	return false;
-}
-
+use anyhow::{anyhow, Result};
+use tracing::instrument;
 
 // Extracted from /Users/nan/bs/aot/src/verifier.c
-static int iter_get_spi(struct bpf_verifier_env *env, struct bpf_reg_state *reg, int nr_slots)
-{
-	return stack_slot_obj_get_spi(env, reg, "iter", nr_slots);
-}
+#[instrument(skip(old, cur))]
+pub fn iter_active_depths_differ(old: &BpfVerifierState, cur: &BpfVerifierState) -> Result<bool> {
+    for fr in (0..=old.curframe as usize).rev() {
+        let state: &BpfFuncState = old.frame[fr];
+        for i in 0..(state.allocated_stack / BPF_REG_SIZE as i32) as usize {
+            if state.stack[i].slot_type[0] != STACK_ITER {
+                continue;
+            }
 
+            let slot: &BpfRegState = &state.stack[i].spilled_ptr;
+            if slot.iter.state != BPF_ITER_STATE_ACTIVE {
+                continue;
+            }
+
+            let cur_slot: &BpfRegState = &cur.frame[fr].stack[i].spilled_ptr;
+            if cur_slot.iter.depth != slot.iter.depth {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
 
 // Extracted from /Users/nan/bs/aot/src/verifier.c
-static u32 iter_ref_obj_id(struct bpf_verifier_env *env, struct bpf_reg_state *reg, int spi)
-{
-	struct bpf_func_state *state = func(env, reg);
-
-	return state->stack[spi].spilled_ptr.ref_obj_id;
+#[instrument(skip(env, reg))]
+pub fn iter_get_spi(env: &mut BpfVerifierEnv, reg: &BpfRegState, nr_slots: i32) -> Result<i32> {
+    stack_slot_obj_get_spi(env, reg, "iter", nr_slots)
 }
 
-
+// Extracted from /Users/nan/bs/aot/src/verifier.c
+#[instrument(skip(env, reg))]
+pub fn iter_ref_obj_id(env: &mut BpfVerifierEnv, reg: &BpfRegState, spi: i32) -> Result<u32> {
+    let state = func(env, reg)?;
+    Ok(state.stack[spi as usize].spilled_ptr.ref_obj_id)
+}
