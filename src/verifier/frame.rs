@@ -1,9 +1,14 @@
+//! Missing types: BpfVerifierState, BpfFuncState
+
+use anyhow::Result;
+use tracing::instrument;
+
 // Extracted from /Users/nan/bs/aot/src/verifier.c
-static u32 frame_insn_idx(struct bpf_verifier_state *st, u32 frame)
-{
-	return frame == st->curframe
-	       ? st->insn_idx
-	       : st->frame[frame + 1]->callsite;
+#[instrument(skip(st))]
+pub fn frame_insn_idx(st: &BpfVerifierState, frame: u32) -> Result<u32> {
+    Ok(if frame == st.curframe as u32 {
+        st.insn_idx as u32
+    } else {
+        st.frame[(frame + 1) as usize].callsite as u32
+    })
 }
-
-
