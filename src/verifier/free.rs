@@ -1,86 +1,80 @@
-// Extracted from /Users/nan/bs/aot/src/verifier.c
-static void free_backedges(struct bpf_scc_visit *visit)
-{
-	struct bpf_scc_backedge *backedge, *next;
+//! Missing types: BpfSccVisit, BpfSccBackedge, BpfFuncState, BpfVerifierEnv, BpfVerifierStateList, ListHead, BpfSccInfo, BpfVerifierState
 
-	for (backedge = visit->backedges; backedge; backedge = next) {
-		free_verifier_state(&backedge->state, false);
-		next = backedge->next;
-		kfree(backedge);
-	}
-	visit->backedges = NULL;
-}
-
+use anyhow::Result;
+use tracing::instrument;
 
 // Extracted from /Users/nan/bs/aot/src/verifier.c
-static void free_func_state(struct bpf_func_state *state)
-{
-	if (!state)
-		return;
-	kfree(state->stack);
-	kfree(state);
+#[instrument(skip(visit))]
+pub fn free_backedges(visit: &mut BpfSccVisit) -> Result<()> {
+    let mut cur = visit.backedges.take();
+    while let Some(mut backedge) = cur {
+        free_verifier_state(&mut backedge.state, false)?;
+        cur = backedge.next.take();
+    }
+    visit.backedges = None;
+    Ok(())
 }
-
 
 // Extracted from /Users/nan/bs/aot/src/verifier.c
-static void free_states(struct bpf_verifier_env *env)
-{
-	struct bpf_verifier_state_list *sl;
-	struct list_head *head, *pos, *tmp;
-	struct bpf_scc_info *info;
-	int i, j;
-
-	free_verifier_state(env->cur_state, true);
-	env->cur_state = NULL;
-	while (!pop_stack(env, NULL, NULL, false));
-
-	list_for_each_safe(pos, tmp, &env->free_list) {
-		sl = container_of(pos, struct bpf_verifier_state_list, node);
-		free_verifier_state(&sl->state, false);
-		kfree(sl);
-	}
-	INIT_LIST_HEAD(&env->free_list);
-
-	for (i = 0; i < env->scc_cnt; ++i) {
-		info = env->scc_info[i];
-		if (!info)
-			continue;
-		for (j = 0; j < info->num_visits; j++)
-			free_backedges(&info->visits[j]);
-		kvfree(info);
-		env->scc_info[i] = NULL;
-	}
-
-	if (!env->explored_states)
-		return;
-
-	for (i = 0; i < state_htab_size(env); i++) {
-		head = &env->explored_states[i];
-
-		list_for_each_safe(pos, tmp, head) {
-			sl = container_of(pos, struct bpf_verifier_state_list, node);
-			free_verifier_state(&sl->state, false);
-			kfree(sl);
-		}
-		INIT_LIST_HEAD(&env->explored_states[i]);
-	}
+#[instrument(skip(state))]
+pub fn free_func_state(state: &mut Option<Box<BpfFuncState>>) -> Result<()> {
+    if let Some(s) = state.as_mut() {
+        s.stack = Vec::new();
+    }
+    *state = None;
+    Ok(())
 }
-
 
 // Extracted from /Users/nan/bs/aot/src/verifier.c
-static void free_verifier_state(struct bpf_verifier_state *state,
-				bool free_self)
-{
-	int i;
+#[instrument(skip(env))]
+pub fn free_states(env: &mut BpfVerifierEnv) -> Result<()> {
+    if env.cur_state.is_some() {
+        free_verifier_state(env.cur_state.as_mut().unwrap(), true)?;
+    }
+    env.cur_state = None;
 
-	for (i = 0; i <= state->curframe; i++) {
-		free_func_state(state->frame[i]);
-		state->frame[i] = NULL;
-	}
-	kfree(state->refs);
-	clear_jmp_history(state);
-	if (free_self)
-		kfree(state);
+    while pop_stack(env, None, None, false) {}
+
+    for sl in env.free_list.iter_mut() {
+        free_verifier_state(&mut sl.state, false)?;
+    }
+    env.free_list.clear();
+
+    for i in 0..env.scc_cnt as usize {
+        if let Some(info) = env.scc_info[i].as_mut() {
+            for j in 0..info.num_visits as usize {
+                free_backedges(&mut info.visits[j])?;
+            }
+        }
+        env.scc_info[i] = None;
+    }
+
+    if env.explored_states.is_empty() {
+        return Ok(());
+    }
+
+    for head in env.explored_states.iter_mut() {
+        for sl in head.iter_mut() {
+            free_verifier_state(&mut sl.state, false)?;
+        }
+        head.clear();
+    }
+
+    Ok(())
 }
 
-
+// Extracted from /Users/nan/bs/aot/src/verifier.c
+#[instrument(skip(state))]
+pub fn free_verifier_state(state: &mut BpfVerifierState, free_self: bool) -> Result<()> {
+    for i in 0..=state.curframe as usize {
+        let mut slot = state.frame[i].take();
+        free_func_state(&mut slot)?;
+        state.frame[i] = None;
+    }
+    state.refs.clear();
+    clear_jmp_history(state)?;
+    if free_self {
+        state.cleaned = true;
+    }
+    Ok(())
+}
