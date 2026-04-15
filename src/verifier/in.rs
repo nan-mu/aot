@@ -1,48 +1,47 @@
-// Extracted from /Users/nan/bs/aot/src/verifier.c
-static bool in_rbtree_lock_required_cb(struct bpf_verifier_env *env)
-{
-	struct bpf_verifier_state *state = env->cur_state;
-	struct bpf_insn *insn = env->prog->insnsi;
-	struct bpf_func_state *callee;
-	int kfunc_btf_id;
+//! Missing types: BpfVerifierEnv, BpfVerifierState, BpfInsn, BpfFuncState
 
-	if (!state->curframe)
-		return false;
-
-	callee = state->frame[state->curframe];
-
-	if (!callee->in_callback_fn)
-		return false;
-
-	kfunc_btf_id = insn[callee->callsite].imm;
-	return is_rbtree_lock_required_kfunc(kfunc_btf_id);
-}
-
+use anyhow::Result;
+use tracing::instrument;
 
 // Extracted from /Users/nan/bs/aot/src/verifier.c
-static bool in_rcu_cs(struct bpf_verifier_env *env)
-{
-	return env->cur_state->active_rcu_locks ||
-	       env->cur_state->active_locks ||
-	       !in_sleepable(env);
-}
+#[instrument(skip(env))]
+pub fn in_rbtree_lock_required_cb(env: &mut BpfVerifierEnv) -> Result<bool> {
+    let state: &mut BpfVerifierState = env.cur_state;
+    let insn: &mut [BpfInsn] = env.prog.insnsi;
 
+    if state.curframe == 0 {
+        return Ok(false);
+    }
+
+    let callee: &mut BpfFuncState = state.frame[state.curframe as usize];
+    if !callee.in_callback_fn {
+        return Ok(false);
+    }
+
+    let kfunc_btf_id = insn[callee.callsite as usize].imm;
+    Ok(is_rbtree_lock_required_kfunc(kfunc_btf_id))
+}
 
 // Extracted from /Users/nan/bs/aot/src/verifier.c
-static bool in_sleepable(struct bpf_verifier_env *env)
-{
-	return env->cur_state->in_sleepable;
+#[instrument(skip(env))]
+pub fn in_rcu_cs(env: &mut BpfVerifierEnv) -> Result<bool> {
+    Ok(env.cur_state.active_rcu_locks != 0
+        || env.cur_state.active_locks != 0
+        || !in_sleepable(env)?)
 }
-
 
 // Extracted from /Users/nan/bs/aot/src/verifier.c
-static inline bool in_sleepable_context(struct bpf_verifier_env *env)
-{
-	return !env->cur_state->active_rcu_locks &&
-	       !env->cur_state->active_preempt_locks &&
-	       !env->cur_state->active_locks &&
-	       !env->cur_state->active_irq_id &&
-	       in_sleepable(env);
+#[instrument(skip(env))]
+pub fn in_sleepable(env: &mut BpfVerifierEnv) -> Result<bool> {
+    Ok(env.cur_state.in_sleepable)
 }
 
-
+// Extracted from /Users/nan/bs/aot/src/verifier.c
+#[instrument(skip(env))]
+pub fn in_sleepable_context(env: &mut BpfVerifierEnv) -> Result<bool> {
+    Ok(env.cur_state.active_rcu_locks == 0
+        && env.cur_state.active_preempt_locks == 0
+        && env.cur_state.active_locks == 0
+        && env.cur_state.active_irq_id == 0
+        && in_sleepable(env)?)
+}
