@@ -1,38 +1,65 @@
+//! Missing types: BpfVerifierEnv, BpfMap, BpfRegState
+
+use anyhow::{anyhow, Result};
+use tracing::instrument;
+
 // Extracted from /Users/nan/bs/aot/src/verifier.c
-static int indirect_jump_min_max_index(struct bpf_verifier_env *env,
-				       int regno,
-				       struct bpf_map *map,
-				       u32 *pmin_index, u32 *pmax_index)
-{
-	struct bpf_reg_state *reg = reg_state(env, regno);
-	u64 min_index, max_index;
-	const u32 size = 8;
+#[instrument(skip(env, map, pmin_index, pmax_index))]
+pub fn indirect_jump_min_max_index(
+    env: &mut BpfVerifierEnv,
+    regno: i32,
+    map: &BpfMap,
+    pmin_index: &mut u32,
+    pmax_index: &mut u32,
+) -> Result<i32> {
+    let reg: &BpfRegState = reg_state(env, regno);
+    let size: u32 = 8;
 
-	if (check_add_overflow(reg->umin_value, reg->off, &min_index) ||
-		(min_index > (u64) U32_MAX * size)) {
-		verbose(env, "the sum of R%u umin_value %llu and off %u is too big\n",
-			     regno, reg->umin_value, reg->off);
-		return -ERANGE;
-	}
-	if (check_add_overflow(reg->umax_value, reg->off, &max_index) ||
-		(max_index > (u64) U32_MAX * size)) {
-		verbose(env, "the sum of R%u umax_value %llu and off %u is too big\n",
-			     regno, reg->umax_value, reg->off);
-		return -ERANGE;
-	}
+    let min_index = reg
+        .umin_value
+        .checked_add(reg.off as u64)
+        .ok_or_else(|| anyhow!("indirect_jump_min_max_index failed"))?;
+    if min_index > (u32::MAX as u64) * size as u64 {
+        verbose(
+            env,
+            format!(
+                "the sum of R{} umin_value {} and off {} is too big\n",
+                regno, reg.umin_value, reg.off
+            ),
+        );
+        return Err(anyhow!("indirect_jump_min_max_index failed"));
+    }
 
-	min_index /= size;
-	max_index /= size;
+    let max_index = reg
+        .umax_value
+        .checked_add(reg.off as u64)
+        .ok_or_else(|| anyhow!("indirect_jump_min_max_index failed"))?;
+    if max_index > (u32::MAX as u64) * size as u64 {
+        verbose(
+            env,
+            format!(
+                "the sum of R{} umax_value {} and off {} is too big\n",
+                regno, reg.umax_value, reg.off
+            ),
+        );
+        return Err(anyhow!("indirect_jump_min_max_index failed"));
+    }
 
-	if (max_index >= map->max_entries) {
-		verbose(env, "R%u points to outside of jump table: [%llu,%llu] max_entries %u\n",
-			     regno, min_index, max_index, map->max_entries);
-		return -EINVAL;
-	}
+    let min_index = (min_index / size as u64) as u32;
+    let max_index = (max_index / size as u64) as u32;
 
-	*pmin_index = min_index;
-	*pmax_index = max_index;
-	return 0;
+    if max_index >= map.max_entries {
+        verbose(
+            env,
+            format!(
+                "R{} points to outside of jump table: [{},{}] max_entries {}\n",
+                regno, min_index, max_index, map.max_entries
+            ),
+        );
+        return Err(anyhow!("indirect_jump_min_max_index failed"));
+    }
+
+    *pmin_index = min_index;
+    *pmax_index = max_index;
+    Ok(0)
 }
-
-
