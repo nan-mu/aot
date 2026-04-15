@@ -1,49 +1,43 @@
+//! Missing types: BpfVerifierState, BpfIdmap
+
+use anyhow::Result;
+use tracing::instrument;
+
 // Extracted from /Users/nan/bs/aot/src/verifier.c
-static bool refsafe(struct bpf_verifier_state *old, struct bpf_verifier_state *cur,
-		    struct bpf_idmap *idmap)
-{
-	int i;
+#[instrument(skip(old, cur, idmap))]
+pub fn refsafe(old: &BpfVerifierState, cur: &BpfVerifierState, idmap: &mut BpfIdmap) -> Result<bool> {
+    if old.acquired_refs != cur.acquired_refs
+        || old.active_locks != cur.active_locks
+        || old.active_preempt_locks != cur.active_preempt_locks
+        || old.active_rcu_locks != cur.active_rcu_locks
+    {
+        return Ok(false);
+    }
 
-	if (old->acquired_refs != cur->acquired_refs)
-		return false;
+    if !check_ids(old.active_irq_id, cur.active_irq_id, idmap)
+        || !check_ids(old.active_lock_id, cur.active_lock_id, idmap)
+        || old.active_lock_ptr != cur.active_lock_ptr
+    {
+        return Ok(false);
+    }
 
-	if (old->active_locks != cur->active_locks)
-		return false;
+    for i in 0..old.acquired_refs as usize {
+        if !check_ids(old.refs[i].id, cur.refs[i].id, idmap)
+            || old.refs[i].r#type != cur.refs[i].r#type
+        {
+            return Ok(false);
+        }
 
-	if (old->active_preempt_locks != cur->active_preempt_locks)
-		return false;
+        match old.refs[i].r#type {
+            REF_TYPE_PTR | REF_TYPE_IRQ => {}
+            REF_TYPE_LOCK | REF_TYPE_RES_LOCK | REF_TYPE_RES_LOCK_IRQ => {
+                if old.refs[i].ptr != cur.refs[i].ptr {
+                    return Ok(false);
+                }
+            }
+            _ => return Ok(false),
+        }
+    }
 
-	if (old->active_rcu_locks != cur->active_rcu_locks)
-		return false;
-
-	if (!check_ids(old->active_irq_id, cur->active_irq_id, idmap))
-		return false;
-
-	if (!check_ids(old->active_lock_id, cur->active_lock_id, idmap) ||
-	    old->active_lock_ptr != cur->active_lock_ptr)
-		return false;
-
-	for (i = 0; i < old->acquired_refs; i++) {
-		if (!check_ids(old->refs[i].id, cur->refs[i].id, idmap) ||
-		    old->refs[i].type != cur->refs[i].type)
-			return false;
-		switch (old->refs[i].type) {
-		case REF_TYPE_PTR:
-		case REF_TYPE_IRQ:
-			break;
-		case REF_TYPE_LOCK:
-		case REF_TYPE_RES_LOCK:
-		case REF_TYPE_RES_LOCK_IRQ:
-			if (old->refs[i].ptr != cur->refs[i].ptr)
-				return false;
-			break;
-		default:
-			WARN_ONCE(1, "Unhandled enum type for reference state: %d\n", old->refs[i].type);
-			return false;
-		}
-	}
-
-	return true;
+    Ok(true)
 }
-
-
