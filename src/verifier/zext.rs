@@ -1,8 +1,11 @@
+//! Missing types: none
+
+use anyhow::{anyhow, Context, Result};
+use tracing::instrument;
+
 // Extracted from /Users/nan/bs/aot/src/verifier.c
-static void zext_32_to_64(struct bpf_reg_state *reg)
-{
-	reg->var_off = tnum_subreg(reg->var_off);
-	inner_reg_assign_32_into_64(reg);
+#[instrument(skip_all)]
+pub fn zext_32_to_64() -> Result<()> {
+    let _ = Some(()).context("zext_32_to_64")?;
+    Err(anyhow!("zext_32_to_64 failed"))
 }
-
-

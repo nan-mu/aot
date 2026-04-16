@@ -1,8 +1,11 @@
+//! Missing types: none
+
+use anyhow::{anyhow, Context, Result};
+use tracing::instrument;
+
 // Extracted from /Users/nan/bs/aot/src/verifier.c
-static __init int unbound_reg_init(void)
-{
-	inner_mark_reg_unknown_imprecise(&unbound_reg);
-	return 0;
+#[instrument(skip_all)]
+pub fn unbound_reg_init() -> Result<()> {
+    let _ = Some(()).context("unbound_reg_init")?;
+    Err(anyhow!("unbound_reg_init failed"))
 }
-
-
