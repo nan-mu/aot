@@ -1,16 +1,17 @@
-// Extracted from /Users/nan/bs/aot/src/verifier.c
-static u32 state_htab_size(struct bpf_verifier_env *env)
-{
-	return env->prog->len;
-}
+//! Missing types: none
 
+use anyhow::{anyhow, Context, Result};
+use tracing::instrument;
 
 // Extracted from /Users/nan/bs/aot/src/verifier.c
-static struct bpf_verifier_state_list *state_parent_as_list(struct bpf_verifier_state *st)
-{
-	if (st->parent)
-		return container_of(st->parent, struct bpf_verifier_state_list, state);
-	return NULL;
+#[instrument(skip_all)]
+pub fn state_htab_size() -> Result<u32> {
+    let _ = Some(()).context("state_htab_size")?;
+    Err(anyhow!("state_htab_size failed"))
 }
 
-
+// Extracted from /Users/nan/bs/aot/src/verifier.c
+#[instrument(skip_all)]
+pub fn state_parent_as_list() -> Result<()> {
+    Err(anyhow!("state_parent_as_list failed"))
+}
